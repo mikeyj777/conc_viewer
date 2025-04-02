@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Bounding Box Visualization</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            background-color: #111; /* Dark background */
+            color: #fff;
+            font-family: sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            display: block;
+            color: #fff;
+        }
+        canvas {
+            display: block; /* Prevent extra space below canvas */
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Visualizing Bounding Box from cong_vol_bounds.txt [cite: 1] <br/>Drag to orbit, scroll to zoom, right-click drag to pan.</div>
+    <div id="container"></div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+      let scene, camera, renderer, controls;
+      let boxMesh;
+
+      // --- Data from cong_vol_bounds.txt [cite: 1] ---
+      // ,x_min,x_max,y_min,y_max,z_min,z_max
+      // 0,125.32994127692768,135.32994127692768,-120.11425987328477,-110.11425987328477,0,10
+      const bounds = {
+          x_min: 125.32994127692768,
+          x_max: 135.32994127692768,
+          y_min: -120.11425987328477,
+          y_max: -110.11425987328477,
+          z_min: 0,
+          z_max: 10
+      };
+      // --- End Data ---
+
+      function init() {
+          // --- Scene ---
+          scene = new THREE.Scene();
+          scene.background = new THREE.Color(0x111111);
+
+          // --- Camera ---
+          const aspect = window.innerWidth / window.innerHeight;
+          camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+          // Initial position will be adjusted later based on box center
+
+          // --- Renderer ---
+          renderer = new THREE.WebGLRenderer({ antialias: true });
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          document.getElementById('container').appendChild(renderer.domElement);
+
+          // --- Controls ---
+          controls = new OrbitControls(camera, renderer.domElement);
+          controls.enableDamping = true; // Optional damping effect
+          controls.dampingFactor = 0.05;
+
+          // --- Lights ---
+          const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Soft white light
+          scene.add(ambientLight);
+          const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+          directionalLight.position.set(50, 50, 50);
+          scene.add(directionalLight);
+
+          // --- Calculate Box Dimensions and Center [cite: 1] ---
+          const width = bounds.x_max - bounds.x_min;
+          const height = bounds.y_max - bounds.y_min; // Corresponds to Y axis
+          const depth = bounds.z_max - bounds.z_min; // Corresponds to Z axis
+
+          const centerX = (bounds.x_max + bounds.x_min) / 2;
+          const centerY = (bounds.y_max + bounds.y_min) / 2;
+          const centerZ = (bounds.z_max + bounds.z_min) / 2;
+
+          // --- Create Bounding Box Geometry ---
+          const boxGeometry = new THREE.BoxGeometry(width, height, depth);
+
+          // --- Create Wireframe ---
+          // Option 1: EdgesGeometry (often cleaner lines)
+          const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
+          const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 }); // Bright green wireframe
+          boxMesh = new THREE.LineSegments(edgesGeometry, lineMaterial);
+
+          // Option 2: Wireframe Material on BoxGeometry
+          // const wireframeMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+          // boxMesh = new THREE.Mesh(boxGeometry, wireframeMaterial);
+
+          // --- Position the Box ---
+          boxMesh.position.set(centerX, centerY, centerZ);
+          scene.add(boxMesh);
+
+          // --- Adjust Camera ---
+          // Position camera to look at the center of the box
+          // Move it back along Z and slightly up along Y
+          const boxSize = Math.max(width, height, depth);
+          camera.position.set(centerX, centerY + boxSize * 0.5, centerZ + boxSize * 1.5); // Adjust multiplier for distance
+          controls.target.set(centerX, centerY, centerZ); // Make controls orbit around the box center
+          camera.lookAt(centerX, centerY, centerZ);
+          controls.update(); // Important after setting target
+
+          // --- Axes Helper (Optional) ---
+          // Helps orient the scene, shows X(red), Y(green), Z(blue)
+          const axesHelper = new THREE.AxesHelper(boxSize * 1.2); // Make slightly larger than box
+          // Position axes helper near the origin or box corner for reference
+          axesHelper.position.set(bounds.x_min, bounds.y_min, bounds.z_min);
+          scene.add(axesHelper);
+
+
+          // --- Event Listeners ---
+          window.addEventListener('resize', onWindowResize, false);
+      }
+
+      function onWindowResize() {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function animate() {
+          requestAnimationFrame(animate);
+          controls.update(); // Only required if controls.enableDamping = true
+          renderer.render(scene, camera);
+      }
+
+      // --- Start ---
+      init();
+      animate();
+
+    </script>
+</body>
+</html>

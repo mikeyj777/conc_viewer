@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title>Interactive 3D Hong Kong Map</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css' rel='stylesheet' />
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent scrollbars on body */
+            font-family: 'Arial', sans-serif;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0; /* Default: map takes full width */
+            width: 100%;
+            z-index: 1;
+        }
+
+        #sidebar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 250px; /* Width of the sidebar */
+            height: 100vh; /* Full viewport height */
+            background-color: rgba(35, 55, 75, 0.9); /* Semi-transparent dark background */
+            color: #fff;
+            padding: 20px;
+            box-sizing: border-box; /* Include padding in width calculation */
+            z-index: 2; /* Ensure sidebar is above the map */
+            overflow-y: auto; /* Add scroll if content overflows */
+            transition: transform 0.3s ease; /* Smooth transition for potential future hiding */
+        }
+
+        /* Adjust map position when sidebar is present */
+        body.sidebar-visible #map {
+            left: 250px; /* Same as sidebar width */
+            width: calc(100% - 250px); /* Adjust map width */
+        }
+
+        #sidebar h2 {
+            margin-top: 0;
+            color: #eee;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+        }
+
+        #destination-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        #destination-list li {
+            padding: 10px 5px;
+            cursor: pointer;
+            border-bottom: 1px solid #444;
+            transition: background-color 0.2s ease;
+        }
+
+        #destination-list li:last-child {
+            border-bottom: none;
+        }
+
+        #destination-list li:hover {
+            background-color: rgba(60, 80, 100, 0.9);
+        }
+
+        /* Optional: Style for Mapbox attribution control if needed */
+        .mapboxgl-ctrl-bottom-left {
+            left: 260px !important; /* Adjust position based on sidebar */
+        }
+        body:not(.sidebar-visible) .mapboxgl-ctrl-bottom-left {
+             left: 10px !important; /* Reset when sidebar is hidden */
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Hong Kong Destinations</h2>
+        <ul id="destination-list">
+            </ul>
+    </div>
+
+    <div id='map'></div>
+
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js'></script>
+
+    <script src='https://unpkg.com/three@0.158.0/build/three.min.js'></script>
+
+    <script src='https://cdn.jsdelivr.net/npm/threebox-gl@0.3.0/dist/threebox.min.js'></script>
+
+
+    <script>
+        // IMPORTANT: Replace with your actual Mapbox Access Token
+        mapboxgl.accessToken = 'pk.eyJ1IjoibWlrZS1teWxvcGEiLCJhIjoiY204eWpoYWYwMDF1aDJsb2M1bjBia2t5MiJ9.VMWM7hdrMrG-NIvDVSEcsA';
+
+        // --- Configuration ---
+        const initialCoords = [114.1694, 22.3193]; // Center of Hong Kong
+        const initialZoom = 11;
+        const initialPitch = 55; // Angle for 3D view
+        const initialBearing = -10; // Initial rotation
+
+        // --- Top Tourist Destinations ---
+        // Add more destinations here with their [longitude, latitude]
+        const destinations = [
+            { name: "Victoria Peak (The Peak Tram)", coordinates: [114.1500, 22.2709] },
+            { name: "Star Ferry Pier (Tsim Sha Tsui)", coordinates: [114.1690, 22.2935] },
+            { name: "Wong Tai Sin Temple", coordinates: [114.1935, 22.3425] },
+            { name: "Avenue of Stars", coordinates: [114.1740, 22.2930] },
+            { name: "Hong Kong Disneyland", coordinates: [114.0422, 22.3130] },
+            { name: "Ocean Park", coordinates: [114.1761, 22.2466] },
+            { name: "Tian Tan Buddha (Big Buddha)", coordinates: [113.9050, 22.2540] },
+            { name: "Lan Kwai Fong", coordinates: [114.1549, 22.2808] },
+            { name: "Temple Street Night Market", coordinates: [114.1703, 22.3049] }
+        ];
+
+        // --- Map Initialization ---
+        const map = new mapboxgl.Map({
+            container: 'map', // container ID
+            style: 'mapbox://styles/mapbox/standard', // Using a Mapbox style that supports 3D terrain/buildings
+            // style: 'mapbox://styles/mapbox/dark-v11', // Alternative dark style
+            // style: 'mapbox://styles/mapbox/light-v11', // Alternative light style
+            center: initialCoords, // starting position [lng, lat]
+            zoom: initialZoom, // starting zoom
+            pitch: initialPitch, // starting pitch
+            bearing: initialBearing, // starting bearing
+            antialias: true // Improves rendering quality
+        });
+
+        // Add map controls
+        map.addControl(new mapboxgl.NavigationControl());
+        map.addControl(new mapboxgl.FullscreenControl());
+
+        // Apply class to body to adjust map layout for sidebar
+        document.body.classList.add('sidebar-visible');
+
+        // --- Populate Sidebar ---
+        const destinationList = document.getElementById('destination-list');
+
+        destinations.forEach(dest => {
+            const listItem = document.createElement('li');
+            listItem.textContent = dest.name;
+            // Store coordinates directly on the element using data attributes
+            listItem.setAttribute('data-lng', dest.coordinates[0]);
+            listItem.setAttribute('data-lat', dest.coordinates[1]);
+            destinationList.appendChild(listItem);
+        });
+
+        // --- Sidebar Click Handler ---
+        destinationList.addEventListener('click', function(event) {
+            if (event.target && event.target.nodeName === 'LI') {
+                const lng = parseFloat(event.target.getAttribute('data-lng'));
+                const lat = parseFloat(event.target.getAttribute('data-lat'));
+
+                if (!isNaN(lng) && !isNaN(lat)) {
+                    map.flyTo({
+                        center: [lng, lat],
+                        zoom: 15.5, // Zoom in closer when flying to a destination
+                        pitch: 60,  // Maintain or adjust pitch
+                        bearing: map.getBearing(), // Keep current bearing or set a specific one
+                        essential: true // Ensures the animation completes
+                    });
+                } else {
+                    console.error("Invalid coordinates for:", event.target.textContent);
+                }
+            }
+        });
+
+        // --- Threebox / three.js Integration ---
+        map.on('style.load', () => {
+            // Add 3D terrain if using a style that supports it (like 'standard')
+             map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+
+            // Add a sky layer for realism
+             map.addLayer({
+                'id': 'sky',
+                'type': 'sky',
+                'paint': {
+                    'sky-type': 'atmosphere',
+                    'sky-atmosphere-sun': [0.0, 0.0], // Adjust sun position if desired
+                    'sky-atmosphere-sun-intensity': 5
+                }
+            });
+
+
+            // Initialize Threebox
+            window.tb = new Threebox(
+                map,
+                map.getCanvas().getContext('webgl'),
+                {
+                    defaultLights: true, // Add default lighting
+                    // enableSelectingFeatures: true, // Enable if you want object selection events
+                    // enableTooltips: true // Enable if you want tooltips on 3D objects
+                }
+            );
+
+            // Add the Threebox custom layer to Mapbox
+            map.addLayer({
+                id: 'threebox-layer',
+                type: 'custom',
+                renderingMode: '3d',
+                onAdd: function (map, gl) {
+                    // You can add initial three.js objects here if needed
+                    // Example: Adding a simple cube (adjust coordinates)
+                    /*
+                    const geometry = new THREE.BoxGeometry(100, 100, 100); // Size in meters
+                    const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+                    const cube = new THREE.Mesh(geometry, material);
+                    // Convert lng/lat to Threebox world coordinates and add the cube
+                    const cubeLngLat = [114.1694, 22.3193]; // Example coords
+                    const cubeObject = tb.Object3D({ obj: cube, units: 'meters' })
+                                         .setCoords(cubeLngLat);
+                    tb.add(cubeObject);
+                    */
+                    console.log("Threebox layer added.");
+                },
+                render: function (gl, matrix) {
+                    // Update threebox scene matrix
+                    tb.update();
+                }
+            });
+
+            console.log("Map style loaded, Threebox initialized.");
+        });
+
+        map.on('load', () => {
+             console.log("Map fully loaded.");
+             // You can trigger actions here once the map is fully loaded,
+             // but style.load is usually better for adding layers/sources.
+        });
+
+        map.on('error', (e) => {
+            console.error('Mapbox error:', e);
+            if (e.error && e.error.message.includes('Token')) {
+                 alert('Mapbox Access Token is invalid or missing. Please replace "YOUR_MAPBOX_ACCESS_TOKEN" in the code.');
+            }
+        });
+
+    </script>
+
+</body>
+</html>

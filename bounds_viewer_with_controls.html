@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flammable Envelope Visualization (File Load + Views)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            background-color: #111; /* Dark background */
+            color: #fff;
+            font-family: sans-serif;
+        }
+        #controls-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px 15px;
+            border-radius: 5px;
+            color: #ccc;
+            font-size: 0.9em;
+            max-width: 300px;
+        }
+         #controls-panel label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+         #controls-panel input[type="file"] {
+            display: block;
+            margin-bottom: 10px;
+            color: #eee; /* Make file input text visible */
+        }
+         #controls-panel button {
+            background-color: #444;
+            color: #eee;
+            border: 1px solid #666;
+            padding: 5px 10px;
+            margin-top: 8px;
+            margin-right: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+         }
+         #controls-panel button:hover {
+            background-color: #555;
+         }
+         #controls-panel .view-controls {
+             margin-top: 10px;
+             border-top: 1px solid #555;
+             padding-top: 10px;
+         }
+         #status {
+            margin-top: 5px;
+            font-style: italic;
+            color: #aaa;
+        }
+        #legend {
+             position: absolute;
+             bottom: 10px;
+             left: 10px;
+             z-index: 100;
+             display: none; /* Hide initially */
+             color: #ccc;
+             background-color: rgba(0,0,0,0.5);
+             padding: 10px;
+             border-radius: 5px;
+             font-size: 0.8em;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            margin-right: 5px;
+            vertical-align: middle;
+            border: 1px solid #555;
+        }
+        canvas {
+            display: block; /* Prevent extra space below canvas */
+        }
+    </style>
+</head>
+<body>
+    <div id="controls-panel">
+        <label for="fileInput">Load Flammable Envelope File (flam_env.txt):</label>
+        <input type="file" id="fileInput" accept=".txt,text/plain">
+        <div>Point Size: <input type="range" id="pointSizeSlider" min="0.01" max="1.0" step="0.01" value="0.1"> <span id="pointSizeValue">0.1</span></div>
+        <div id="status">Please load the flam_env.txt file.</div>
+
+        <div class="view-controls">
+            <label>Camera Views:</label>
+            <button id="btnNorthUp">North Up</button>
+            <button id="btnTopDown">Top Down</button>
+            <button id="btnSideOn">Side On</button>
+        </div>
+    </div>
+
+     <div id="legend">
+        Color Legend (Concentration g/m³):<br>
+        <span class="legend-color" style="background-color: blue;"></span> Min: <span id="minConc">...</span><br>
+        <span class="legend-color" style="background-color: yellow;"></span> Mean: <span id="meanConc">...</span><br>
+        <span class="legend-color" style="background-color: lime;"></span> Max: <span id="maxConc">...</span>
+    </div>
+
+    <div id="container"></div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/",
+          "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.esm.js"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+      import TWEEN from '@tweenjs/tween.js'; // Import TWEEN library
+
+      let scene, camera, renderer, controls;
+      let pointsObject = null; // To hold the point cloud, initially null
+      let boundsObject = null; // To hold the bounds wireframe
+      let sceneCenter = new THREE.Vector3(0, 0, 0); // To store the calculated center
+
+      // --- Embedded Bounds Data ---
+      const boundsData = `,x_min,x_max,y_min,y_max,z_min,z_max\r\n0,125.32994127692768,135.32994127692768,-120.11425987328477,-110.11425987328477,0,10\r\n`;
+      let bounds = {};
+      try {
+            const lines = boundsData.trim().split('\r\n');
+            if (lines.length >= 2) {
+                const headers = lines[0].split(','); const values = lines[1].split(',');
+                const headerMap = { x_min: headers.indexOf('x_min'), x_max: headers.indexOf('x_max'), y_min: headers.indexOf('y_min'), y_max: headers.indexOf('y_max'), z_min: headers.indexOf('z_min'), z_max: headers.indexOf('z_max') };
+                bounds.x_min = parseFloat(values[headerMap.x_min]); bounds.x_max = parseFloat(values[headerMap.x_max]);
+                bounds.y_min = parseFloat(values[headerMap.y_min]); bounds.y_max = parseFloat(values[headerMap.y_max]);
+                bounds.z_min = parseFloat(values[headerMap.z_min]); bounds.z_max = parseFloat(values[headerMap.z_max]);
+                if (Object.values(bounds).some(isNaN)) throw new Error("Invalid bounds data.");
+            } else { throw new Error("Bounds data format incorrect."); }
+            // Calculate scene center based on bounds
+            sceneCenter.set(
+                 (bounds.x_max + bounds.x_min) / 2,
+                 (bounds.y_max + bounds.y_min) / 2,
+                 (bounds.z_max + bounds.z_min) / 2
+            );
+      } catch (e) {
+            console.error("Error parsing embedded bounds data:", e);
+            bounds = { x_min: -10, x_max: 10, y_min: -10, y_max: 10, z_min: 0, z_max: 10 };
+            sceneCenter.set(0, 0, 5); // Default center
+            alert("Error parsing bounds data. Using default bounds.");
+      }
+      // --- End Bounds Data ---
+
+      // --- DOM Elements ---
+      const fileInput = document.getElementById('fileInput');
+      const statusDiv = document.getElementById('status');
+      const legendDiv = document.getElementById('legend');
+      const minConcSpan = document.getElementById('minConc');
+      const meanConcSpan = document.getElementById('meanConc');
+      const maxConcSpan = document.getElementById('maxConc');
+      const pointSizeSlider = document.getElementById('pointSizeSlider');
+      const pointSizeValueSpan = document.getElementById('pointSizeValue');
+      const btnNorthUp = document.getElementById('btnNorthUp');
+      const btnTopDown = document.getElementById('btnTopDown');
+      const btnSideOn = document.getElementById('btnSideOn');
+      const clock = new THREE.Clock(); // Clock for animation timing
+
+
+      function init() {
+          // --- Scene ---
+          scene = new THREE.Scene();
+          scene.background = new THREE.Color(0x111111);
+
+          // --- Camera ---
+          const aspect = window.innerWidth / window.innerHeight;
+          camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 2000); // Increased far plane
+
+          // --- Renderer ---
+          renderer = new THREE.WebGLRenderer({ antialias: true });
+          renderer.setPixelRatio(window.devicePixelRatio); // Better resolution on high DPI displays
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          document.getElementById('container').appendChild(renderer.domElement);
+
+          // --- Controls ---
+          controls = new OrbitControls(camera, renderer.domElement);
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.05;
+          controls.target.copy(sceneCenter); // Set initial target
+
+          // --- Lights ---
+          scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+          const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+          directionalLight.position.set(50, 50, 50);
+          scene.add(directionalLight);
+
+          // --- Create and Add Bounding Box ---
+          createBoundsVisual();
+
+          // --- Axes Helper (Optional) ---
+          const boxSize = Math.max(bounds.x_max - bounds.x_min, bounds.y_max - bounds.y_min, bounds.z_max - bounds.z_min);
+          const axesHelper = new THREE.AxesHelper(boxSize * 1.2);
+          axesHelper.position.set(bounds.x_min, bounds.y_min, bounds.z_min);
+          scene.add(axesHelper);
+
+          // --- Adjust Initial Camera ---
+          camera.position.set(sceneCenter.x, sceneCenter.y + boxSize * 0.5, sceneCenter.z + boxSize * 1.8); // Position further back
+          camera.lookAt(sceneCenter);
+          controls.update();
+
+          // --- Event Listeners ---
+          fileInput.addEventListener('change', handleFileSelect, false);
+          pointSizeSlider.addEventListener('input', handlePointSizeChange);
+          btnNorthUp.addEventListener('click', setNorthUpView);
+          btnTopDown.addEventListener('click', setTopDownView);
+          btnSideOn.addEventListener('click', setSideOnView);
+          window.addEventListener('resize', onWindowResize, false);
+
+          // --- Start Animation ---
+          animate();
+      }
+
+      function createBoundsVisual() {
+          if (boundsObject) scene.remove(boundsObject);
+          const width = bounds.x_max - bounds.x_min;
+          const height = bounds.y_max - bounds.y_min;
+          const depth = bounds.z_max - bounds.z_min;
+          const boxGeometry = new THREE.BoxGeometry(width, height, depth);
+          const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
+          const lineMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa });
+          boundsObject = new THREE.LineSegments(edgesGeometry, lineMaterial);
+          boundsObject.position.copy(sceneCenter); // Position at calculated center
+          scene.add(boundsObject);
+      }
+
+      // --- Camera View Functions ---
+
+      function tweenCamera(targetPosition, targetLookAt, duration = 800) {
+          TWEEN.removeAll(); // Stop any existing tweens
+
+          const currentCamPos = camera.position.clone();
+          const currentLookAt = controls.target.clone(); // Target of the controls
+
+          new TWEEN.Tween({
+              x: currentCamPos.x, y: currentCamPos.y, z: currentCamPos.z,
+              tx: currentLookAt.x, ty: currentLookAt.y, tz: currentLookAt.z
+          })
+          .to({
+              x: targetPosition.x, y: targetPosition.y, z: targetPosition.z,
+              tx: targetLookAt.x, ty: targetLookAt.y, tz: targetLookAt.z
+          }, duration)
+          .easing(TWEEN.Easing.Quadratic.Out) // Smooth easing
+          .onUpdate((obj) => {
+              camera.position.set(obj.x, obj.y, obj.z);
+              controls.target.set(obj.tx, obj.ty, obj.tz);
+              camera.lookAt(controls.target); // Make sure camera orientation updates
+              controls.update(); // Update controls during tween
+          })
+           .onComplete(() => {
+                 controls.update(); // Final update
+           })
+          .start();
+      }
+
+      function setNorthUpView() {
+          // Calculate current offset and spherical coordinates
+          const offset = camera.position.clone().sub(controls.target);
+          const radius = offset.length();
+          // Get current spherical coords (phi is angle from Y+, theta is angle from Z+)
+          const spherical = new THREE.Spherical().setFromVector3(offset);
+
+          // Keep radius and angles, but force the 'up' vector
+          // Reconstruct position using the same angles/radius
+          const newPos = new THREE.Vector3().setFromSphericalCoords(radius, spherical.phi, spherical.theta);
+          newPos.add(controls.target); // Add target back to get world position
+
+          // We need to tween the camera *rotation* effectively.
+          // OrbitControls manages 'up' alignment. Often, just setting the target
+          // and position and letting controls.update() fix the 'up' works best.
+          // Let's tween position and target, OrbitControls should handle the rest.
+           tweenCamera(newPos, controls.target.clone());
+
+           // If OrbitControls doesn't fix 'up' automatically during/after tween,
+           // a more complex solution involving quaternions might be needed,
+           // but let's rely on controls.update() first.
+      }
+
+
+      function setTopDownView() {
+           const distance = camera.position.distanceTo(controls.target);
+           // Position directly above the center (adjust distance slightly if needed)
+           const targetPosition = new THREE.Vector3(sceneCenter.x, sceneCenter.y + distance, sceneCenter.z);
+           const targetLookAt = sceneCenter.clone();
+           tweenCamera(targetPosition, targetLookAt);
+            // Note: camera.up will likely be implicitly handled by OrbitControls
+            // when looking straight down after the tween finishes and controls update.
+            // If not, we might need to manually set camera.up after tweening.
+      }
+
+      function setSideOnView() {
+          const offset = camera.position.clone().sub(controls.target);
+          const distance = offset.length();
+          // Keep Y position at the scene center's Y
+          offset.y = 0; // Project onto the horizontal plane (relative to target)
+          // Check if offset is near zero (camera was already top/bottom down)
+          if (offset.lengthSq() < 0.001) {
+              // If looking straight down/up, default to side view along X axis
+              offset.set(distance, 0, 0);
+          } else {
+               // Maintain horizontal direction but adjust distance if needed (using original distance here)
+               offset.setLength(distance);
+          }
+
+          const targetPosition = controls.target.clone().add(offset);
+          targetPosition.y = sceneCenter.y; // Ensure it's level with center
+          const targetLookAt = sceneCenter.clone();
+          tweenCamera(targetPosition, targetLookAt);
+           // Standard up vector (0,1,0) should be fine here and handled by controls
+      }
+
+
+      // --- File Handling & Point Cloud ---
+
+      function handleFileSelect(event) {
+          const file = event.target.files[0];
+          if (!file) { statusDiv.textContent = 'No file selected.'; return; }
+          statusDiv.textContent = `Reading file: ${file.name}...`;
+          legendDiv.style.display = 'none';
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              statusDiv.textContent = 'Processing data...';
+              try {
+                  setTimeout(() => {
+                      parseAndVisualizePoints(e.target.result);
+                      statusDiv.textContent = `Loaded: ${file.name}`;
+                  }, 10);
+              } catch (error) { /* Error handling... */ }
+          };
+          reader.onerror = (e) => { /* Error handling... */ };
+          reader.readAsText(file);
+      }
+
+       function handlePointSizeChange(event) {
+            const newSize = parseFloat(event.target.value);
+            pointSizeValueSpan.textContent = newSize.toFixed(2);
+            if (pointsObject) { pointsObject.material.size = newSize; }
+        }
+
+      function parseAndVisualizePoints(fileContent) {
+          if (pointsObject) {
+              scene.remove(pointsObject);
+              pointsObject.geometry.dispose();
+              pointsObject.material.dispose();
+              pointsObject = null;
+          }
+
+          const lines = fileContent.trim().split(/\r?\n/);
+          if (lines.length < 2) throw new Error("File contains no data rows.");
+
+          const headers = lines[0].trim().split(',').map(h => h.trim());
+          const xIndex = headers.indexOf('x'), yIndex = headers.indexOf('y'), zIndex = headers.indexOf('z'), concIndex = headers.indexOf('conc_g_m3');
+          if (xIndex===-1||yIndex===-1||zIndex===-1||concIndex===-1) throw new Error(`Missing required columns. Need x, y, z, conc_g_m3.`);
+
+          const pointsData = [];
+          let sumConc = 0, minConc = Infinity, maxConc = -Infinity;
+          for (let i = 1; i < lines.length; i++) {
+              const values = lines[i].trim().split(',');
+              if (values.length <= Math.max(xIndex, yIndex, zIndex, concIndex)) continue;
+              const x = parseFloat(values[xIndex]), y = parseFloat(values[yIndex]), z = parseFloat(values[zIndex]), conc = parseFloat(values[concIndex]);
+              if (isNaN(x) || isNaN(y) || isNaN(z) || isNaN(conc)) { console.warn(`Skipping invalid row ${i + 1}`); continue; }
+              pointsData.push({ x, y, z, conc });
+              sumConc += conc; minConc = Math.min(minConc, conc); maxConc = Math.max(maxConc, conc);
+          }
+          if (pointsData.length === 0) throw new Error("No valid data points found.");
+
+          const meanConc = sumConc / pointsData.length;
+          minConcSpan.textContent = minConc.toExponential(2); meanConcSpan.textContent = meanConc.toExponential(2); maxConcSpan.textContent = maxConc.toExponential(2);
+          legendDiv.style.display = 'block';
+
+          const positions = [], colors = [];
+          const colorBlue = new THREE.Color(0x0000ff), colorYellow = new THREE.Color(0xffff00), colorGreen = new THREE.Color(0x00ff00); // lime
+          const tempColor = new THREE.Color();
+          const rangeLow = meanConc - minConc, rangeHigh = maxConc - meanConc;
+
+          for (const p of pointsData) {
+              positions.push(p.x, p.y, p.z);
+              let lerpFactor = 0.5;
+              if (p.conc <= meanConc) {
+                   tempColor.copy(rangeLow > 1e-9 ? colorBlue.lerp(colorYellow, (p.conc - minConc) / rangeLow) : colorYellow);
+              } else {
+                  tempColor.copy(rangeHigh > 1e-9 ? colorYellow.lerp(colorGreen, (p.conc - meanConc) / rangeHigh) : colorYellow);
+              }
+               // Need to reset lerped colors if using lerp in place
+                colorBlue.set(0x0000ff); colorYellow.set(0xffff00); colorGreen.set(0x00ff00); // Reset base colors after potential lerp modification
+                colors.push(tempColor.r, tempColor.g, tempColor.b);
+          }
+
+
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+          geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+          const material = new THREE.PointsMaterial({ size: parseFloat(pointSizeSlider.value), vertexColors: true, sizeAttenuation: true });
+          pointsObject = new THREE.Points(geometry, material);
+          scene.add(pointsObject);
+      }
+
+      // --- Core Animation Loop ---
+      function onWindowResize() {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function animate() {
+          requestAnimationFrame(animate); // Loop
+
+          const delta = clock.getDelta(); // Get time delta for smooth updates
+
+          // Update TWEEN for camera animations
+          TWEEN.update(); // Use default time internal to TWEEN for simplicity here
+
+          // Update OrbitControls AFTER tweens have potentially updated target/position
+          controls.update(delta);
+
+          // Render the scene
+          renderer.render(scene, camera);
+      }
+
+      // --- Start ---
+      init();
+
+    </script>
+</body>
+</html>
