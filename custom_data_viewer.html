@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom 3D Point Cloud Viewer</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background-color: #1a1a1a;
+      color: #fff;
+    }
+    
+    #container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #canvas-container {
+      flex: 1;
+      width: 100%;
+      position: relative;
+    }
+    
+    canvas {
+      display: block;
+      background-color: #000;
+    }
+    
+    .ui-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+      width: 320px;
+    }
+    
+    .ui-panel h3, .ui-panel h4 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+    
+    .control-group {
+      margin-bottom: 10px;
+    }
+    
+    .file-input-container {
+      margin-bottom: 10px;
+    }
+    
+    .file-input-container input[type="file"] {
+      display: block;
+      margin-bottom: 5px;
+    }
+    
+    .slider-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    
+    .slider-container label {
+      width: 100px;
+    }
+    
+    .slider-container input {
+      flex: 1;
+    }
+    
+    .slider-value {
+      width: 40px;
+      text-align: right;
+      margin-left: 10px;
+    }
+    
+    .threshold-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    
+    .threshold-container label {
+      width: 150px;
+    }
+    
+    .threshold-container input[type="number"] {
+      width: 100px;
+      background-color: #333;
+      color: white;
+      border: 1px solid #555;
+      padding: 5px;
+      border-radius: 3px;
+    }
+    
+    button {
+      background-color: #333;
+      color: white;
+      border: 1px solid #555;
+      padding: 5px 10px;
+      margin-right: 5px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    
+    button:hover {
+      background-color: #444;
+    }
+    
+    .btn-group {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 5px;
+    }
+    
+    .legend {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      margin-right: 10px;
+      border-radius: 3px;
+    }
+    
+    .controls-info {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+    
+    .controls-info h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+    
+    .controls-info ul {
+      padding-left: 15px;
+      margin: 0;
+    }
+    
+    .controls-info li {
+      margin-bottom: 5px;
+    }
+    
+    kbd {
+      background-color: #333;
+      border-radius: 3px;
+      border: 1px solid #555;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.2);
+      color: #fff;
+      display: inline-block;
+      font-size: 0.85em;
+      font-weight: 700;
+      line-height: 1;
+      padding: 2px 4px;
+      white-space: nowrap;
+    }
+    
+    #status {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="canvas-container">
+      <canvas id="canvas3d"></canvas>
+    </div>
+    
+    <div class="ui-panel">
+      <h3>Data Visualizer Controls</h3>
+      
+      <div class="control-group">
+        <div class="file-input-container">
+          <label for="data-file">Load Data File:</label>
+          <input type="file" id="data-file" accept=".csv,.txt">
+          <button id="load-sample">Load Sample Data</button>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="slider-container">
+          <label for="point-size">Point Size:</label>
+          <input type="range" id="point-size" min="1" max="10" step="0.5" value="3">
+          <span class="slider-value" id="point-size-value">3</span>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <h4>Concentration Thresholds (ppm)</h4>
+        <div class="threshold-container">
+          <label for="green-threshold">Green (Min):</label>
+          <input type="number" id="green-threshold" min="0" value="0">
+        </div>
+        <div class="threshold-container">
+          <label for="yellow-threshold">Yellow Threshold:</label>
+          <input type="number" id="yellow-threshold" min="0" value="0">
+        </div>
+        <div class="threshold-container">
+          <label for="red-threshold">Red Threshold:</label>
+          <input type="number" id="red-threshold" min="0" value="0">
+        </div>
+        <button id="apply-thresholds">Apply Thresholds</button>
+      </div>
+      
+      <div class="control-group">
+        <div class="btn-group">
+          <button id="view-north">North Up</button>
+          <button id="view-top">Top Down</button>
+          <button id="view-side">Side View</button>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="slider-container">
+          <label for="conc-filter">Concentration Filter:</label>
+          <input type="range" id="conc-filter" min="0" max="100" step="1" value="0">
+          <span class="slider-value" id="conc-filter-value">0%</span>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="btn-group">
+          <button id="reset-view">Reset View</button>
+          <button id="generate-data">New Sample Data</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(0, 255, 0);"></div>
+        <span>Low: <span id="min-value">0</span> - <span id="yellow-value">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(255, 255, 0);"></div>
+        <span>Medium: <span id="yellow-value2">0</span> - <span id="red-value">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(255, 0, 0);"></div>
+        <span>High: > <span id="red-value2">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <span>Range: <span id="min-value2">0</span> - <span id="max-value">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <span>Total Points: <span id="total-points">0</span></span>
+      </div>
+    </div>
+    
+    <div class="controls-info">
+      <h3>Keyboard Controls</h3>
+      <ul>
+        <li><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> - Move view</li>
+        <li><kbd>Shift</kbd> + <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> - Tilt view</li>
+        <li><kbd>Ctrl</kbd> + <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> - Rotate view</li>
+        <li><kbd>+</kbd> - Zoom in</li>
+        <li><kbd>-</kbd> - Zoom out</li>
+        <li><kbd>N</kbd> - North-up view</li>
+        <li><kbd>R</kbd> - Reset view</li>
+        <li><kbd>U</kbd> - Top-down view</li>
+      </ul>
+    </div>
+    
+    <div id="status">
+      Ready
+    </div>
+  </div>
+
+  <script>
+    // Canvas setup
+    const canvas = document.getElementById('canvas3d');
+    const ctx = canvas.getContext('2d');
+    
+    // Resize canvas to window size
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    
+    // Initialize on load
+    window.addEventListener('load', () => {
+      resizeCanvas();
+      resetView();
+      generateData();
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      resizeCanvas();
+      drawScene();
+    });
+    
+    // 3D point data
+    let points = [];
+    let loadedData = null;
+    
+    // Camera and view settings
+    const camera = {
+      x: 0,
+      y: 0,
+      z: 20,
+      rotX: 0,
+      rotY: 0,
+      rotZ: 0,
+      fov: 75,
+      zoom: 1
+    };
+    
+    // Reference point for camera rotation
+    const lookAt = {
+      x: 0,
+      y: 0,
+      z: 0
+    };
+    
+    // Status display
+    function updateStatus(message) {
+      document.getElementById('status').textContent = message;
+      
+      // Clear status after 2 seconds
+      setTimeout(() => {
+        document.getElementById('status').textContent = 'Ready';
+      }, 2000);
+    }
+    
+    // =====================
+    // 3D Rendering Functions
+    // =====================
+    
+    // Project 3D point to 2D screen coordinates
+    function project(x, y, z) {
+      // Translate point relative to camera
+      const dx = x - camera.x;
+      const dy = y - camera.y;
+      const dz = z - camera.z;
+      
+      // Apply camera rotation
+      // X-axis rotation
+      let rx = dx;
+      let ry = dy * Math.cos(camera.rotX) - dz * Math.sin(camera.rotX);
+      let rz = dy * Math.sin(camera.rotX) + dz * Math.cos(camera.rotX);
+      
+      // Y-axis rotation
+      const rx2 = rz * Math.sin(camera.rotY) + rx * Math.cos(camera.rotY);
+      const ry2 = ry;
+      const rz2 = rz * Math.cos(camera.rotY) - rx * Math.sin(camera.rotY);
+      
+      // Z-axis rotation
+      const rx3 = rx2 * Math.cos(camera.rotZ) - ry2 * Math.sin(camera.rotZ);
+      const ry3 = rx2 * Math.sin(camera.rotZ) + ry2 * Math.cos(camera.rotZ);
+      const rz3 = rz2;
+      
+      // Perspective projection
+      const fovRad = camera.fov * Math.PI / 180;
+      const scale = (canvas.height / 2) * camera.zoom / Math.tan(fovRad / 2);
+      
+      if (rz3 <= 0) return null; // Behind camera
+      
+      // Project to screen coordinates
+      const projX = rx3 * scale / rz3 + canvas.width / 2;
+      const projY = ry3 * scale / rz3 + canvas.height / 2;
+      
+      return {
+        x: projX,
+        y: projY,
+        z: rz3 // Return z for depth sorting
+      };
+    }
+    
+    // Draw a 3D point
+    function drawPoint(point, size, color) {
+      const projected = project(point.x, point.y, point.z);
+      if (!projected) return; // Skip if behind camera
+      
+      // Size attenuation based on distance
+      const distance = Math.sqrt(
+        Math.pow(point.x - camera.x, 2) +
+        Math.pow(point.y - camera.y, 2) +
+        Math.pow(point.z - camera.z, 2)
+      );
+      
+      const attenuatedSize = Math.max(1, size / (distance * 0.1));
+      
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(projected.x, projected.y, attenuatedSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Draw the 3D grid for reference
+    function drawGrid() {
+      const gridSize = 10;
+      const gridStep = 2;
+      
+      ctx.strokeStyle = 'rgba(100, 100, 100, 0.5)';
+      ctx.lineWidth = 1;
+      
+      // Draw X-Z grid
+      for (let x = -gridSize; x <= gridSize; x += gridStep) {
+        const p1 = project(x, 0, -gridSize);
+        const p2 = project(x, 0, gridSize);
+        
+        if (p1 && p2) {
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+      }
+      
+      for (let z = -gridSize; z <= gridSize; z += gridStep) {
+        const p1 = project(-gridSize, 0, z);
+        const p2 = project(gridSize, 0, z);
+        
+        if (p1 && p2) {
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+      }
+      
+      // Draw axes
+      // X axis (red)
+      const xStart = project(0, 0, 0);
+      const xEnd = project(gridSize, 0, 0);
+      if (xStart && xEnd) {
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(xStart.x, xStart.y);
+        ctx.lineTo(xEnd.x, xEnd.y);
+        ctx.stroke();
+      }
+      
+      // Y axis (green)
+      const yStart = project(0, 0, 0);
+      const yEnd = project(0, gridSize, 0);
+      if (yStart && yEnd) {
+        ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(yStart.x, yStart.y);
+        ctx.lineTo(yEnd.x, yEnd.y);
+        ctx.stroke();
+      }
+      
+      // Z axis (blue)
+      const zStart = project(0, 0, 0);
+      const zEnd = project(0, 0, gridSize);
+      if (zStart && zEnd) {
+        ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(zStart.x, zStart.y);
+        ctx.lineTo(zEnd.x, zEnd.y);
+        ctx.stroke();
+      }
+      
+      // Draw origin cube
+      const cubeSize = 0.5;
+      const vertices = [
+        { x: -cubeSize, y: -cubeSize, z: -cubeSize },
+        { x: cubeSize, y: -cubeSize, z: -cubeSize },
+        { x: cubeSize, y: cubeSize, z: -cubeSize },
+        { x: -cubeSize, y: cubeSize, z: -cubeSize },
+        { x: -cubeSize, y: -cubeSize, z: cubeSize },
+        { x: cubeSize, y: -cubeSize, z: cubeSize },
+        { x: cubeSize, y: cubeSize, z: cubeSize },
+        { x: -cubeSize, y: cubeSize, z: cubeSize }
+      ];
+      
+      const edges = [
+        [0, 1], [1, 2], [2, 3], [3, 0],
+        [4, 5], [5, 6], [6, 7], [7, 4],
+        [0, 4], [1, 5], [2, 6], [3, 7]
+      ];
+      
+      ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+      ctx.lineWidth = 1;
+      
+      edges.forEach(edge => {
+        const p1 = project(vertices[edge[0]].x, vertices[edge[0]].y, vertices[edge[0]].z);
+        const p2 = project(vertices[edge[1]].x, vertices[edge[1]].y, vertices[edge[1]].z);
+        
+        if (p1 && p2) {
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+      });
+    }
+    
+    // Render the scene
+    function drawScene() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw grid and axes
+      drawGrid();
+      
+      // Get point size from slider
+      const pointSize = parseFloat(document.getElementById('point-size').value);
+      
+      // Sort points by distance from camera for proper depth rendering
+      const sortedPoints = [...points].sort((a, b) => {
+        const distA = Math.pow(a.x - camera.x, 2) + Math.pow(a.y - camera.y, 2) + Math.pow(a.z - camera.z, 2);
+        const distB = Math.pow(b.x - camera.x, 2) + Math.pow(b.y - camera.y, 2) + Math.pow(b.z - camera.z, 2);
+        return distB - distA; // Draw farthest points first
+      });
+      
+      // Draw all points
+      sortedPoints.forEach(point => {
+        drawPoint(point, pointSize, point.color);
+      });
+    }
+    
+    // =====================
+    // Camera Control Functions
+    // =====================
+    
+    // Reset camera to default view
+    function resetView() {
+      camera.x = 10;
+      camera.y = 10;
+      camera.z = 10;
+      camera.rotX = -Math.PI / 4;
+      camera.rotY = Math.PI / 4;
+      camera.rotZ = 0;
+      camera.zoom = 1;
+      
+      lookAt.x = 0;
+      lookAt.y = 0;
+      lookAt.z = 0;
+      
+      updateStatus("View: Reset");
+      drawScene();
+    }
+    
+    // Set north-up view
+    function setNorthUpView() {
+      camera.x = 0;
+      camera.y = -15;
+      camera.z = 0;
+      camera.rotX = 0;
+      camera.rotY = 0;
+      camera.rotZ = 0;
+      
+      lookAt.x = 0;
+      lookAt.y = 0;
+      lookAt.z = 0;
+      
+      updateStatus("View: North Up");
+      drawScene();
+    }
+    
+    // Set top-down view
+    function setTopDownView() {
+      camera.x = 0;
+      camera.y = 0;
+      camera.z = 15;
+      camera.rotX = -Math.PI / 2;
+      camera.rotY = 0;
+      camera.rotZ = 0;
+      
+      lookAt.x = 0;
+      lookAt.y = 0;
+      lookAt.z = 0;
+      
+      updateStatus("View: Top Down");
+      drawScene();
+    }
+    
+    // Set side view
+    function setSideView() {
+      camera.x = 15;
+      camera.y = 0;
+      camera.z = 0;
+      camera.rotX = 0;
+      camera.rotY = -Math.PI / 2;
+      camera.rotZ = 0;
+      
+      lookAt.x = 0;
+      lookAt.y = 0;
+      lookAt.z = 0;
+      
+      updateStatus("View: Side View");
+      drawScene();
+    }
+    
+    // Handle keyboard controls
+    function handleKeyDown(event) {
+      // Don't handle keys if inside input field
+      if (event.target.tagName === 'INPUT') return;
+      
+      const moveStep = 0.5;
+      const rotateStep = 0.05;
+      const zoomStep = 0.1;
+      
+      switch (event.key) {
+        // Zoom
+        case '+':
+        case '=':
+          camera.zoom *= (1 + zoomStep);
+          updateStatus("Zoom In");
+          break;
+        case '-':
+        case '_':
+          camera.zoom *= (1 - zoomStep);
+          updateStatus("Zoom Out");
+          break;
+          
+        // Reset views
+        case 'n':
+        case 'N':
+          setNorthUpView();
+          break;
+        case 'r':
+        case 'R':
+          resetView();
+          break;
+        case 'u':
+        case 'U':
+          setTopDownView();
+          break;
+          
+        // Arrow keys
+        case 'ArrowUp':
+          if (event.shiftKey) {
+            // Tilt up
+            camera.rotX -= rotateStep;
+            updateStatus("Tilt Up");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate up
+            camera.rotX -= rotateStep;
+            updateStatus("Rotate Up");
+          } else {
+            // Move forward
+            const dirX = Math.sin(camera.rotY) * Math.cos(camera.rotX);
+            const dirY = Math.sin(camera.rotX);
+            const dirZ = Math.cos(camera.rotY) * Math.cos(camera.rotX);
+            
+            camera.x += dirX * moveStep;
+            camera.y += dirY * moveStep;
+            camera.z += dirZ * moveStep;
+            
+            updateStatus("Move Forward");
+          }
+          break;
+          
+        case 'ArrowDown':
+          if (event.shiftKey) {
+            // Tilt down
+            camera.rotX += rotateStep;
+            updateStatus("Tilt Down");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate down
+            camera.rotX += rotateStep;
+            updateStatus("Rotate Down");
+          } else {
+            // Move backward
+            const dirX = Math.sin(camera.rotY) * Math.cos(camera.rotX);
+            const dirY = Math.sin(camera.rotX);
+            const dirZ = Math.cos(camera.rotY) * Math.cos(camera.rotX);
+            
+            camera.x -= dirX * moveStep;
+            camera.y -= dirY * moveStep;
+            camera.z -= dirZ * moveStep;
+            
+            updateStatus("Move Backward");
+          }
+          break;
+          
+        case 'ArrowLeft':
+          if (event.shiftKey) {
+            // Tilt left
+            camera.rotZ += rotateStep;
+            updateStatus("Tilt Left");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate left
+            camera.rotY += rotateStep;
+            updateStatus("Rotate Left");
+          } else {
+            // Move left (strafe)
+            const dirX = Math.sin(camera.rotY - Math.PI / 2);
+            const dirZ = Math.cos(camera.rotY - Math.PI / 2);
+            
+            camera.x += dirX * moveStep;
+            camera.z += dirZ * moveStep;
+            
+            updateStatus("Move Left");
+          }
+          break;
+          
+        case 'ArrowRight':
+          if (event.shiftKey) {
+            // Tilt right
+            camera.rotZ -= rotateStep;
+            updateStatus("Tilt Right");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate right
+            camera.rotY -= rotateStep;
+            updateStatus("Rotate Right");
+          } else {
+            // Move right (strafe)
+            const dirX = Math.sin(camera.rotY + Math.PI / 2);
+            const dirZ = Math.cos(camera.rotY + Math.PI / 2);
+            
+            camera.x += dirX * moveStep;
+            camera.z += dirZ * moveStep;
+            
+            updateStatus("Move Right");
+          }
+          break;
+      }
+      
+      drawScene();
+    }
+    
+    // =====================
+    // Data Handling Functions
+    // =====================
+    
+    // Generate sample data
+    function generateData() {
+      const numPoints = 1000;
+      const sampleData = [];
+      
+      // Generate spiral data with varying concentration
+      for (let i = 0; i < numPoints; i++) {
+        const t = Math.PI * 2 * i / 200;
+        const r = 5 + 2 * Math.cos(t * 3);
+        const h = 3 * Math.sin(t * 0.5);
+        
+        const x = r * Math.cos(t);
+        const y = r * Math.sin(t);
+        const z = h;
+        
+        // Calculate concentration value (distance from origin + noise)
+        const distance = Math.sqrt(x*x + y*y + z*z);
+        const conc_ppm = distance * 10 + 20 * Math.random();
+        const conc_g_m3 = conc_ppm * 0.0423; // Fake conversion factor
+        
+        sampleData.push({
+          x: x,
+          y: y,
+          z: z,
+          conc_ppm: conc_ppm,
+          conc_g_m3: conc_g_m3
+        });
+      }
+      
+      loadedData = sampleData;
+      visualizeData(sampleData);
+      updateStatus("Generated Sample Data");
+    }
+    
+    // Parse CSV data
+    function parseCSVData(csvText) {
+      const lines = csvText.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      // Check if required columns exist
+      const hasX = headers.includes('x');
+      const hasY = headers.includes('y');
+      const hasZ = headers.includes('z');
+      const hasConcPPM = headers.includes('conc_ppm');
+      
+      if (!hasX || !hasY || !hasZ || !hasConcPPM) {
+        updateStatus("Error: CSV must have x, y, z, and conc_ppm columns");
+        return null;
+      }
+      
+      const data = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        
+        if (values.length !== headers.length) continue;
+        
+        const point = {};
+        
+        for (let j = 0; j < headers.length; j++) {
+          point[headers[j]] = parseFloat(values[j]);
+        }
+        
+        data.push(point);
+      }
+      
+      return data;
+    }
+    
+    // Visualize data with current settings
+    function visualizeData(data) {
+      if (!data || data.length === 0) return;
+      
+      // Get concentration values
+      const concentrationValues = data.map(p => p.conc_ppm);
+      
+      // Calculate statistics
+      const minConc = Math.min(...concentrationValues);
+      const maxConc = Math.max(...concentrationValues);
+      
+      // Get or calculate thresholds
+      let greenThreshold = parseFloat(document.getElementById('green-threshold').value);
+      let yellowThreshold = parseFloat(document.getElementById('yellow-threshold').value);
+      if (yellowThreshold === 0) {
+        yellowThreshold = minConc + (maxConc - minConc) * 0.33;
+        document.getElementById('yellow-threshold').value = yellowThreshold.toFixed(2);
+      }
+      
+      let redThreshold = parseFloat(document.getElementById('red-threshold').value);
+      if (redThreshold === 0) {
+        redThreshold = minConc + (maxConc - minConc) * 0.67;
+        document.getElementById('red-threshold').value = redThreshold.toFixed(2);
+      }
+      
+      // Apply concentration filter
+      const filterValue = parseInt(document.getElementById('conc-filter').value);
+      let filteredData = data;
+      
+      if (filterValue > 0) {
+        // Sort concentrations and find the threshold
+        const sortedConcs = [...concentrationValues].sort((a, b) => a - b);
+        const filterThreshold = sortedConcs[Math.floor(sortedConcs.length * filterValue / 100)];
+        
+        // Filter data
+        filteredData = data.filter(p => p.conc_ppm >= filterThreshold);
+      }
+      
+      // Update legend
+      document.getElementById('min-value').textContent = minConc.toFixed(2);
+      document.getElementById('min-value2').textContent = minConc.toFixed(2);
+      document.getElementById('max-value').textContent = maxConc.toFixed(2);
+      document.getElementById('yellow-value').textContent = yellowThreshold.toFixed(2);
+      document.getElementById('yellow-value2').textContent = yellowThreshold.toFixed(2);
+      document.getElementById('red-value').textContent = redThreshold.toFixed(2);
+      document.getElementById('red-value2').textContent = redThreshold.toFixed(2);
+      document.getElementById('total-points').textContent = filteredData.length;
+      
+      // Create point objects with colors
+      points = filteredData.map(p => {
+        let color;
+        
+        if (p.conc_ppm < yellowThreshold) {
+          // Green (low)
+          color = 'rgb(0, 255, 0)';
+        } else if (p.conc_ppm < redThreshold) {
+          // Yellow (medium)
+          color = 'rgb(255, 255, 0)';
+        } else {
+          // Red (high)
+          color = 'rgb(255, 0, 0)';
+        }
+        
+        return {
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          color: color,
+          conc_ppm: p.conc_ppm
+        };
+      });
+      
+      drawScene();
+    }
+    
+    // Handle file upload
+    function handleFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      
+      reader.onload = function(e) {
+        const contents = e.target.result;
+        const data = parseCSVData(contents);
+        
+        if (data) {
+          loadedData = data;
+          visualizeData(data);
+          updateStatus(`Loaded ${data.length} data points`);
+        }
+      };
+      
+      reader.readAsText(file);
+    }
+    
+    // Generate sample CSV data
+    function generateSampleData() {
+      // Create sample CSV content
+      const sampleData = [
+        "x,y,z,conc_ppm,conc_g_m3",
+        "1.0,2.0,3.0,150.5,6.37",
+        "2.5,1.0,4.0,205.3,8.68",
+        "3.0,3.5,2.0,89.7,3.79",
+        "4.2,2.8,1.5,320.1,13.54",
+        "1.8,4.5,3.2,175.8,7.44",
+        "0.5,3.7,4.8,250.6,10.60",
+        "3.8,1.2,2.7,110.3,4.67",
+        "2.2,5.0,1.8,280.4,11.86",
+        "5.1,2.3,3.6,95.2,4.03",
+        "4.5,3.9,2.6,198.7,8.40"
+      ].join("\n");
+      
+      const data = parseCSVData(sampleData);
+      
+      if (data) {
+        loadedData = data;
+        visualizeData(data);
+        updateStatus("Loaded Sample Data");
+      }
+    }
+    
+    // =====================
+    // Mouse Interaction Functions
+    // =====================
+    
+    // Variables for mouse tracking
+    let isMouseDown = false;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+    
+    // Handle mouse down
+    canvas.addEventListener('mousedown', (e) => {
+      isMouseDown = true;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+    });
+    
+    // Handle mouse up and mouse leave
+    canvas.addEventListener('mouseup', () => {
+      isMouseDown = false;
+    });
+    
+    canvas.addEventListener('mouseleave', () => {
+      isMouseDown = false;
+    });
+    
+    // Handle mouse move (for rotation)
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isMouseDown) return;
+      
+      const deltaX = e.clientX - lastMouseX;
+      const deltaY = e.clientY - lastMouseY;
+      
+      if (e.shiftKey) {
+        // Tilt (shift + drag)
+        camera.rotX += deltaY * 0.01;
+        camera.rotZ += deltaX * 0.01;
+      } else {
+        // Rotate
+        camera.rotY -= deltaX * 0.01;
+        camera.rotX += deltaY * 0.01;
+      }
+      
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      
+      drawScene();
+    });
+    
+    // Handle mouse wheel (for zoom)
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      
+      const zoomAmount = e.deltaY < 0 ? 1.1 : 0.9;
+      camera.zoom *= zoomAmount;
+      
+      drawScene();
+    });
+    
+    // =====================
+    // Event Listeners
+    // =====================
+    
+    // Point size slider
+    document.getElementById('point-size').addEventListener('input', () => {
+      const size = parseFloat(document.getElementById('point-size').value);
+      document.getElementById('point-size-value').textContent = size.toFixed(1);
+      drawScene();
+    });
+    
+    // Concentration filter slider
+    document.getElementById('conc-filter').addEventListener('input', () => {
+      const filterValue = parseInt(document.getElementById('conc-filter').value);
+      document.getElementById('conc-filter-value').textContent = filterValue + '%';
+      
+      if (loadedData) {
+        visualizeData(loadedData);
+      }
+    });
+    
+    // Apply thresholds button
+    document.getElementById('apply-thresholds').addEventListener('click', () => {
+      if (loadedData) {
+        visualizeData(loadedData);
+        updateStatus("Thresholds Applied");
+      }
+    });
+    
+    // View buttons
+    document.getElementById('view-north').addEventListener('click', setNorthUpView);
+    document.getElementById('view-top').addEventListener('click', setTopDownView);
+    document.getElementById('view-side').addEventListener('click', setSideView);
+    document.getElementById('reset-view').addEventListener('click', resetView);
+    
+    // File input
+    document.getElementById('data-file').addEventListener('change', handleFileUpload);
+    
+    // Generate sample data
+    document.getElementById('generate-data').addEventListener('click', generateData);
+    
+    // Load sample data
+    document.getElementById('load-sample').addEventListener('click', generateSampleData);
+    
+    // Keyboard controls
+    document.addEventListener('keydown', handleKeyDown);
+    
+    // Animation loop for smooth rendering (optional)
+    function animate() {
+      requestAnimationFrame(animate);
+      // Add any continuous animations here if needed
+    }
+    
+    // Start the animation loop
+    animate();
+  </script>
+</body>
+</html>

@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Point Cloud Viewer with Three.js</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background-color: #1a1a1a;
+      color: #fff;
+    }
+    
+    #container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #scene-container {
+      flex: 1;
+      width: 100%;
+      position: relative;
+    }
+    
+    canvas {
+      display: block;
+    }
+    
+    .ui-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+      width: 320px;
+    }
+    
+    .ui-panel h3, .ui-panel h4 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+    
+    .control-group {
+      margin-bottom: 10px;
+    }
+    
+    .file-input-container {
+      margin-bottom: 10px;
+    }
+    
+    .file-input-container input[type="file"] {
+      display: block;
+      margin-bottom: 5px;
+    }
+    
+    .slider-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    
+    .slider-container label {
+      width: 100px;
+    }
+    
+    .slider-container input {
+      flex: 1;
+    }
+    
+    .slider-value {
+      width: 40px;
+      text-align: right;
+      margin-left: 10px;
+    }
+    
+    .threshold-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    
+    .threshold-container label {
+      width: 150px;
+    }
+    
+    .threshold-container input[type="number"] {
+      width: 100px;
+      background-color: #333;
+      color: white;
+      border: 1px solid #555;
+      padding: 5px;
+      border-radius: 3px;
+    }
+    
+    button {
+      background-color: #333;
+      color: white;
+      border: 1px solid #555;
+      padding: 5px 10px;
+      margin-right: 5px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    
+    button:hover {
+      background-color: #444;
+    }
+    
+    .btn-group {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 5px;
+    }
+    
+    .legend {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      margin-right: 10px;
+      border-radius: 3px;
+    }
+    
+    .controls-info {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+    
+    .controls-info h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+    
+    .controls-info ul {
+      padding-left: 15px;
+      margin: 0;
+    }
+    
+    .controls-info li {
+      margin-bottom: 5px;
+    }
+    
+    kbd {
+      background-color: #333;
+      border-radius: 3px;
+      border: 1px solid #555;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.2);
+      color: #fff;
+      display: inline-block;
+      font-size: 0.85em;
+      font-weight: 700;
+      line-height: 1;
+      padding: 2px 4px;
+      white-space: nowrap;
+    }
+    
+    #status {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="container">
+    <div id="scene-container"></div>
+    
+    <div class="ui-panel">
+      <h3>Data Visualizer Controls</h3>
+      
+      <div class="control-group">
+        <div class="file-input-container">
+          <label for="data-file">Load Data File:</label>
+          <input type="file" id="data-file" accept=".csv,.txt">
+          <button id="load-sample">Load Sample Data</button>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="slider-container">
+          <label for="point-size">Point Size:</label>
+          <input type="range" id="point-size" min="0.05" max="1" step="0.05" value="0.2">
+          <span class="slider-value" id="point-size-value">0.2</span>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <h4>Concentration Thresholds (ppm)</h4>
+        <div class="threshold-container">
+          <label for="green-threshold">Green (Min):</label>
+          <input type="number" id="green-threshold" min="0" value="0">
+        </div>
+        <div class="threshold-container">
+          <label for="yellow-threshold">Yellow Threshold:</label>
+          <input type="number" id="yellow-threshold" min="0" value="0">
+        </div>
+        <div class="threshold-container">
+          <label for="red-threshold">Red Threshold:</label>
+          <input type="number" id="red-threshold" min="0" value="0">
+        </div>
+        <button id="apply-thresholds">Apply Thresholds</button>
+      </div>
+      
+      <div class="control-group">
+        <div class="btn-group">
+          <button id="view-north">North Up</button>
+          <button id="view-top">Top Down</button>
+          <button id="view-side">Side View</button>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="slider-container">
+          <label for="conc-filter">Concentration Filter:</label>
+          <input type="range" id="conc-filter" min="0" max="100" step="1" value="0">
+          <span class="slider-value" id="conc-filter-value">0%</span>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="btn-group">
+          <button id="reset-view">Reset View</button>
+          <button id="generate-data">New Sample Data</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(0, 255, 0);"></div>
+        <span>Low: <span id="min-value">0</span> - <span id="yellow-value">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(255, 255, 0);"></div>
+        <span>Medium: <span id="yellow-value2">0</span> - <span id="red-value">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(255, 0, 0);"></div>
+        <span>High: > <span id="red-value2">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <span>Range: <span id="min-value2">0</span> - <span id="max-value">0</span> ppm</span>
+      </div>
+      <div class="legend-item">
+        <span>Total Points: <span id="total-points">0</span></span>
+      </div>
+    </div>
+    
+    <div class="controls-info">
+      <h3>Keyboard Controls</h3>
+      <ul>
+        <li><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> - Move view</li>
+        <li><kbd>Shift</kbd> + <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> - Tilt view</li>
+        <li><kbd>Ctrl</kbd> + <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> - Rotate view</li>
+        <li><kbd>+</kbd> - Zoom in</li>
+        <li><kbd>-</kbd> - Zoom out</li>
+        <li><kbd>N</kbd> - North-up view</li>
+        <li><kbd>R</kbd> - Reset view</li>
+        <li><kbd>U</kbd> - Top-down view</li>
+      </ul>
+    </div>
+    
+    <div id="status">
+      Ready
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    
+    // Global variables
+    let scene, camera, renderer, controls;
+    let points, pointCloud;
+    let loadedData = null;
+    let concentrationValues = [];
+    
+    // Initialize the 3D scene
+    function init() {
+      // Create scene
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+      
+      // Create camera
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(10, 10, 10);
+      camera.lookAt(0, 0, 0);
+      
+      // Create renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      document.getElementById('scene-container').appendChild(renderer.domElement);
+      
+      // Create OrbitControls
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.1;
+      
+      // Add grid helper
+      const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x333333);
+      scene.add(gridHelper);
+      
+      // Add axes helper
+      const axesHelper = new THREE.AxesHelper(5);
+      scene.add(axesHelper);
+      
+      // Add reference cube at origin
+      const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
+      const edges = new THREE.EdgesGeometry(cubeGeometry);
+      const cube = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: 0x00ffff })
+      );
+      scene.add(cube);
+      
+      // Add lights
+      const ambientLight = new THREE.AmbientLight(0x404040);
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(1, 1, 1);
+      scene.add(directionalLight);
+      
+      // Handle window resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+      
+      // Start animation loop
+      animate();
+    }
+    
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    
+    // Update status display
+    function updateStatus(message) {
+      document.getElementById('status').textContent = message;
+      
+      // Clear status after 2 seconds
+      setTimeout(() => {
+        document.getElementById('status').textContent = 'Ready';
+      }, 2000);
+    }
+    
+    // Generate sample data
+    function generateData() {
+      if (pointCloud) {
+        scene.remove(pointCloud);
+      }
+      
+      const numPoints = 5000;
+      const positions = new Float32Array(numPoints * 3);
+      const colors = new Float32Array(numPoints * 3);
+      
+      // Build sample data
+      const sampleData = [];
+      
+      // Generate spiral data with varying concentration
+      for (let i = 0; i < numPoints; i++) {
+        const t = Math.PI * 2 * i / 1000 * 3;
+        const r = 5 + 2 * Math.cos(t * 3);
+        const h = 3 * Math.sin(t * 0.5);
+        
+        const x = r * Math.cos(t);
+        const y = r * Math.sin(t);
+        const z = h;
+        
+        // Calculate concentration value (distance from origin + noise)
+        const distance = Math.sqrt(x*x + y*y + z*z);
+        const conc_ppm = distance * 10 + 20 * Math.random();
+        const conc_g_m3 = conc_ppm * 0.0423; // Fake conversion factor
+        
+        sampleData.push({
+          x: x,
+          y: y,
+          z: z,
+          conc_ppm: conc_ppm,
+          conc_g_m3: conc_g_m3
+        });
+      }
+      
+      loadedData = sampleData;
+      visualizeData(sampleData);
+    }
+    
+    // Generate sample CSV data
+    function generateSampleData() {
+      // Create sample CSV content
+      const sampleData = [
+        "x,y,z,conc_ppm,conc_g_m3",
+        "1.0,2.0,3.0,150.5,6.37",
+        "2.5,1.0,4.0,205.3,8.68",
+        "3.0,3.5,2.0,89.7,3.79",
+        "4.2,2.8,1.5,320.1,13.54",
+        "1.8,4.5,3.2,175.8,7.44",
+        "0.5,3.7,4.8,250.6,10.60",
+        "3.8,1.2,2.7,110.3,4.67",
+        "2.2,5.0,1.8,280.4,11.86",
+        "5.1,2.3,3.6,95.2,4.03",
+        "4.5,3.9,2.6,198.7,8.40"
+      ].join("\n");
+      
+      const data = parseCSVData(sampleData);
+      
+      if (data) {
+        loadedData = data;
+        visualizeData(data);
+        updateStatus("Loaded Sample Data");
+      }
+    }
+    
+    // Parse CSV data
+    function parseCSVData(csvText) {
+      const lines = csvText.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      // Check if required columns exist
+      const hasX = headers.includes('x');
+      const hasY = headers.includes('y');
+      const hasZ = headers.includes('z');
+      const hasConcPPM = headers.includes('conc_ppm');
+      
+      if (!hasX || !hasY || !hasZ || !hasConcPPM) {
+        updateStatus("Error: CSV must have x, y, z, and conc_ppm columns");
+        return null;
+      }
+      
+      const data = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        
+        if (values.length !== headers.length) continue;
+        
+        const point = {};
+        
+        for (let j = 0; j < headers.length; j++) {
+          point[headers[j]] = parseFloat(values[j]);
+        }
+        
+        data.push(point);
+      }
+      
+      return data;
+    }
+    
+    // Visualize data with current settings
+    function visualizeData(data) {
+      if (!data || data.length === 0) return;
+      
+      if (pointCloud) {
+        scene.remove(pointCloud);
+      }
+      
+      const numPoints = data.length;
+      const positions = new Float32Array(numPoints * 3);
+      const colors = new Float32Array(numPoints * 3);
+      
+      concentrationValues = [];
+      
+      // Extract positions and concentration values
+      for (let i = 0; i < numPoints; i++) {
+        const point = data[i];
+        
+        positions[i * 3] = point.x;
+        positions[i * 3 + 1] = point.y;
+        positions[i * 3 + 2] = point.z;
+        
+        concentrationValues.push(point.conc_ppm);
+      }
+      
+      // Calculate statistics
+      const concCopy = [...concentrationValues];
+      concCopy.sort((a, b) => a - b);
+      
+      const minConc = concCopy[0];
+      const maxConc = concCopy[numPoints - 1];
+      
+      // Get or calculate thresholds
+      let greenThreshold = parseFloat(document.getElementById('green-threshold').value);
+      let yellowThreshold = parseFloat(document.getElementById('yellow-threshold').value);
+      if (yellowThreshold === 0) {
+        yellowThreshold = minConc + (maxConc - minConc) * 0.33;
+        document.getElementById('yellow-threshold').value = yellowThreshold.toFixed(2);
+      }
+      
+      let redThreshold = parseFloat(document.getElementById('red-threshold').value);
+      if (redThreshold === 0) {
+        redThreshold = minConc + (maxConc - minConc) * 0.67;
+        document.getElementById('red-threshold').value = redThreshold.toFixed(2);
+      }
+      
+      // Update legend
+      document.getElementById('min-value').textContent = minConc.toFixed(2);
+      document.getElementById('min-value2').textContent = minConc.toFixed(2);
+      document.getElementById('max-value').textContent = maxConc.toFixed(2);
+      document.getElementById('yellow-value').textContent = yellowThreshold.toFixed(2);
+      document.getElementById('yellow-value2').textContent = yellowThreshold.toFixed(2);
+      document.getElementById('red-value').textContent = redThreshold.toFixed(2);
+      document.getElementById('red-value2').textContent = redThreshold.toFixed(2);
+      document.getElementById('total-points').textContent = numPoints;
+      
+      // Assign colors based on concentration and thresholds
+      for (let i = 0; i < numPoints; i++) {
+        const concentration = concentrationValues[i];
+        let color;
+        
+        if (concentration < yellowThreshold) {
+          // Green (low)
+          color = new THREE.Color(0, 1, 0);
+        } else if (concentration < redThreshold) {
+          // Yellow (medium)
+          color = new THREE.Color(1, 1, 0);
+        } else {
+          // Red (high)
+          color = new THREE.Color(1, 0, 0);
+        }
+        
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+      }
+      
+      // Create point cloud
+      points = new THREE.BufferGeometry();
+      points.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      points.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      
+      const pointMaterial = new THREE.PointsMaterial({
+        size: parseFloat(document.getElementById('point-size').value),
+        vertexColors: true,
+        sizeAttenuation: true
+      });
+      
+      pointCloud = new THREE.Points(points, pointMaterial);
+      scene.add(pointCloud);
+      
+      updateConcentrationFilter();
+    }
+    
+    // Update point size from slider
+    function updatePointSize() {
+      if (pointCloud) {
+        const size = parseFloat(document.getElementById('point-size').value);
+        pointCloud.material.size = size;
+        document.getElementById('point-size-value').textContent = size.toFixed(2);
+      }
+    }
+    
+    // Update concentration filter
+    function updateConcentrationFilter() {
+      if (!pointCloud || !points || !concentrationValues.length) return;
+      
+      const filterValue = parseInt(document.getElementById('conc-filter').value);
+      document.getElementById('conc-filter-value').textContent = filterValue + '%';
+      
+      if (filterValue === 0) {
+        // Skip filtering when value is 0 - just show all points
+        return;
+      } else {
+        // Filter points
+        const concCopy = [...concentrationValues];
+        concCopy.sort((a, b) => a - b);
+        
+        const threshold = concCopy[Math.floor(concCopy.length * filterValue / 100)];
+        
+        const filteredPositions = [];
+        const filteredColors = [];
+        
+        const origPositions = points.attributes.position.array;
+        const origColors = points.attributes.color.array;
+        
+        for (let i = 0; i < concentrationValues.length; i++) {
+          if (concentrationValues[i] >= threshold) {
+            filteredPositions.push(origPositions[i * 3], origPositions[i * 3 + 1], origPositions[i * 3 + 2]);
+            filteredColors.push(origColors[i * 3], origColors[i * 3 + 1], origColors[i * 3 + 2]);
+          }
+        }
+        
+        points.setAttribute('position', new THREE.BufferAttribute(new Float32Array(filteredPositions), 3));
+        points.setAttribute('color', new THREE.BufferAttribute(new Float32Array(filteredColors), 3));
+        
+        points.attributes.position.needsUpdate = true;
+        points.attributes.color.needsUpdate = true;
+      }
+    }
+    
+    // Apply threshold changes
+    function applyThresholds() {
+      if (loadedData) {
+        visualizeData(loadedData);
+        updateStatus("Thresholds Applied");
+      }
+    }
+    
+    // Handle file upload
+    function handleFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      
+      reader.onload = function(e) {
+        const contents = e.target.result;
+        const data = parseCSVData(contents);
+        
+        if (data) {
+          loadedData = data;
+          visualizeData(data);
+          updateStatus(`Loaded ${data.length} data points`);
+        }
+      };
+      
+      reader.readAsText(file);
+    }
+    
+    // Camera view presets
+    function setNorthUpView() {
+      controls.reset();
+      camera.position.set(0, -15, 0);
+      camera.up.set(0, 0, 1);
+      camera.lookAt(0, 0, 0);
+      controls.update();
+      updateStatus("View: North Up");
+    }
+    
+    function setTopDownView() {
+      controls.reset();
+      camera.position.set(0, 0, 15);
+      camera.up.set(0, 1, 0);
+      camera.lookAt(0, 0, 0);
+      controls.update();
+      updateStatus("View: Top Down");
+    }
+    
+    function setSideView() {
+      controls.reset();
+      camera.position.set(15, 0, 0);
+      camera.up.set(0, 0, 1);
+      camera.lookAt(0, 0, 0);
+      controls.update();
+      updateStatus("View: Side View");
+    }
+    
+    function resetView() {
+      controls.reset();
+      camera.position.set(10, 10, 10);
+      camera.up.set(0, 0, 1);
+      camera.lookAt(0, 0, 0);
+      controls.update();
+      updateStatus("View: Reset");
+    }
+    
+    // Handle keyboard controls
+    function handleKeyDown(event) {
+      const step = 1;
+      const rotateStep = 0.1;
+      
+      // Don't handle keys if inside input field
+      if (event.target.tagName === 'INPUT') return;
+      
+      switch (event.key) {
+        // Zoom
+        case '+':
+        case '=':
+          camera.position.multiplyScalar(0.9);
+          updateStatus("Zoom In");
+          break;
+        case '-':
+        case '_':
+          camera.position.multiplyScalar(1.1);
+          updateStatus("Zoom Out");
+          break;
+          
+        // Reset views
+        case 'n':
+        case 'N':
+          setNorthUpView();
+          break;
+        case 'r':
+        case 'R':
+          resetView();
+          break;
+        case 'u':
+        case 'U':
+          setTopDownView();
+          break;
+          
+        // Arrow keys
+        case 'ArrowUp':
+          if (event.shiftKey) {
+            // Tilt up
+            const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            camera.position.applyAxisAngle(axis, rotateStep);
+            updateStatus("Tilt Up");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate up
+            const offset = new THREE.Vector3().subVectors(controls.target, camera.position);
+            const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            offset.applyAxisAngle(axis, rotateStep);
+            camera.position.copy(controls.target).sub(offset);
+            updateStatus("Rotate Up");
+          } else {
+            // Move forward
+            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            camera.position.addScaledVector(direction, step);
+            controls.target.addScaledVector(direction, step);
+            updateStatus("Move Forward");
+          }
+          break;
+          
+        case 'ArrowDown':
+          if (event.shiftKey) {
+            // Tilt down
+            const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            camera.position.applyAxisAngle(axis, -rotateStep);
+            updateStatus("Tilt Down");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate down
+            const offset = new THREE.Vector3().subVectors(controls.target, camera.position);
+            const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            offset.applyAxisAngle(axis, -rotateStep);
+            camera.position.copy(controls.target).sub(offset);
+            updateStatus("Rotate Down");
+          } else {
+            // Move backward
+            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            camera.position.addScaledVector(direction, -step);
+            controls.target.addScaledVector(direction, -step);
+            updateStatus("Move Backward");
+          }
+          break;
+          
+        case 'ArrowLeft':
+          if (event.shiftKey) {
+            // Tilt left
+            const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+            camera.position.applyAxisAngle(axis, rotateStep);
+            updateStatus("Tilt Left");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate left
+            const offset = new THREE.Vector3().subVectors(controls.target, camera.position);
+            const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+            offset.applyAxisAngle(axis, rotateStep);
+            camera.position.copy(controls.target).sub(offset);
+            updateStatus("Rotate Left");
+          } else {
+            // Move left
+            const direction = new THREE.Vector3(-1, 0, 0).applyQuaternion(camera.quaternion);
+            camera.position.addScaledVector(direction, step);
+            controls.target.addScaledVector(direction, step);
+            updateStatus("Move Left");
+          }
+          break;
+          
+        case 'ArrowRight':
+          if (event.shiftKey) {
+            // Tilt right
+            const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+            camera.position.applyAxisAngle(axis, -rotateStep);
+            updateStatus("Tilt Right");
+          } else if (event.ctrlKey || event.metaKey) {
+            // Rotate right
+            const offset = new THREE.Vector3().subVectors(controls.target, camera.position);
+            const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+            offset.applyAxisAngle(axis, -rotateStep);
+            camera.position.copy(controls.target).sub(offset);
+            updateStatus("Rotate Right");
+          } else {
+            // Move right
+            const direction = new THREE.Vector3(-1, 0, 0).applyQuaternion(camera.quaternion);
+            camera.position.addScaledVector(direction, -step);
+            controls.target.addScaledVector(direction, -step);
+            updateStatus("Move Right");
+          }
+          break;
+      }
+      
+      controls.update();
+    }
+    
+    // Set up event listeners
+    function setupEventListeners() {
+      // Point size slider
+      document.getElementById('point-size').addEventListener('input', updatePointSize);
+      
+      // Concentration filter slider
+      document.getElementById('conc-filter').addEventListener('input', updateConcentrationFilter);
+      
+      // Apply thresholds button
+      document.getElementById('apply-thresholds').addEventListener('click', applyThresholds);
+      
+      // View buttons
+      document.getElementById('view-north').addEventListener('click', setNorthUpView);
+      document.getElementById('view-top').addEventListener('click', setTopDownView);
+      document.getElementById('view-side').addEventListener('click', setSideView);
+      document.getElementById('reset-view').addEventListener('click', resetView);
+      document.getElementById('generate-data').addEventListener('click', () => {
+        generateData();
+        updateStatus("Generated Sample Data");
+      });
+      
+      // File input
+      document.getElementById('data-file').addEventListener('change', handleFileUpload);
+      
+      // Load sample data
+      document.getElementById('load-sample').addEventListener('click', generateSampleData);
+      
+      // Keyboard controls
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    
+    // Initialize everything when the page loads
+    window.addEventListener('load', () => {
+      init();
+      setupEventListeners();
+      generateData();
+    });
+  </script>
+</body>
+</html>

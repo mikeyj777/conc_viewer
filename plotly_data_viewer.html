@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Concentration Data Viewer</title>
+  <!-- Load Plotly.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.24.2/plotly.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+    
+    body {
+      background-color: #f5f5f5;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-bottom: 20px;
+      padding: 15px;
+      background-color: #f9f9f9;
+      border-radius: 5px;
+    }
+    
+    .file-input {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .file-input label {
+      font-weight: bold;
+      color: #555;
+    }
+    
+    .button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-weight: bold;
+      transition: background-color 0.3s;
+    }
+    
+    .button:hover {
+      background-color: #45a049;
+    }
+    
+    .button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    #plot-container {
+      width: 100%;
+      height: 600px;
+      margin-top: 20px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    
+    .status.success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    
+    .status.error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
+    
+    .loading {
+      display: none;
+      text-align: center;
+      margin-top: 10px;
+    }
+    
+    .loading::after {
+      content: "...";
+      animation: dots 1.5s steps(5, end) infinite;
+    }
+    
+    @keyframes dots {
+      0%, 20% { content: "."; }
+      40% { content: ".."; }
+      60%, 100% { content: "..."; }
+    }
+    
+    .color-legend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 15px;
+      padding: 10px;
+    }
+    
+    .gradient {
+      width: 300px;
+      height: 20px;
+      background: linear-gradient(to right, #00ff00, #ffff00, #ff0000);
+      margin: 0 10px;
+    }
+    
+    .legend-label {
+      font-weight: bold;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>3D Concentration Data Viewer</h1>
+    
+    <div class="controls">
+      <div class="file-input">
+        <label for="csv-file">Upload CSV Data File:</label>
+        <input type="file" id="csv-file" accept=".csv, .txt" />
+        <small>CSV should contain x, y, z position and concentration_ppm columns</small>
+      </div>
+      
+      <button id="load-button" class="button" disabled>Load Data</button>
+      <div id="loading" class="loading">Loading data</div>
+      <div id="status" class="status"></div>
+    </div>
+    
+    <div id="plot-container"></div>
+    
+    <div class="color-legend">
+      <span class="legend-label">Low</span>
+      <div class="gradient"></div>
+      <span class="legend-label">High</span>
+    </div>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Elements
+      const fileInput = document.getElementById('csv-file');
+      const loadButton = document.getElementById('load-button');
+      const statusEl = document.getElementById('status');
+      const loadingEl = document.getElementById('loading');
+      const plotContainer = document.getElementById('plot-container');
+      
+      // Enable load button when file is selected
+      fileInput.addEventListener('change', function() {
+        loadButton.disabled = !fileInput.files.length;
+        statusEl.textContent = '';
+        statusEl.className = 'status';
+      });
+      
+      // Handle data loading
+      loadButton.addEventListener('click', function() {
+        const file = fileInput.files[0];
+        if (!file) return;
+        
+        loadingEl.style.display = 'block';
+        statusEl.textContent = '';
+        statusEl.className = 'status';
+        
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+          try {
+            const csvData = e.target.result;
+            processData(csvData);
+          } catch (error) {
+            showError('Error processing data: ' + error.message);
+          }
+        };
+        
+        reader.onerror = function() {
+          showError('Error reading file');
+        };
+        
+        reader.readAsText(file);
+      });
+      
+      function processData(csvText) {
+        // Parse CSV data
+        const lines = csvText.split(/\r\n|\n/).filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          showError('CSV file does not contain enough data');
+          return;
+        }
+        
+        // Get headers
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        
+        // Find required column indices
+        const xIndex = headers.indexOf('x');
+        const yIndex = headers.indexOf('y');
+        const zIndex = headers.indexOf('z');
+        const concIndex = headers.findIndex(h => h.includes('conc_ppm') || h === 'concentration_ppm');
+        
+        if (xIndex === -1 || yIndex === -1 || zIndex === -1 || concIndex === -1) {
+          showError('CSV is missing required columns. Need x, y, z, and conc_ppm columns.');
+          return;
+        }
+        
+        // Parse data
+        const x = [];
+        const y = [];
+        const z = [];
+        const concentrations = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim());
+          
+          if (values.length <= Math.max(xIndex, yIndex, zIndex, concIndex)) {
+            continue; // Skip invalid rows
+          }
+          
+          const xVal = parseFloat(values[xIndex]);
+          const yVal = parseFloat(values[yIndex]);
+          const zVal = parseFloat(values[zIndex]);
+          const concVal = parseFloat(values[concIndex]);
+          
+          if (!isNaN(xVal) && !isNaN(yVal) && !isNaN(zVal) && !isNaN(concVal)) {
+            x.push(xVal);
+            y.push(yVal);
+            z.push(zVal);
+            concentrations.push(concVal);
+          }
+        }
+        
+        if (x.length === 0) {
+          showError('No valid data points found in the CSV');
+          return;
+        }
+        
+        createPlot(x, y, z, concentrations);
+      }
+      
+      function createPlot(x, y, z, concentrations) {
+        // Get concentration range for color scaling
+        const minConc = Math.min(...concentrations);
+        const maxConc = Math.max(...concentrations);
+        
+        // Generate colors based on concentration (green to yellow to red)
+        const colors = concentrations.map(c => {
+          // Normalize value between 0 and 1
+          const normalized = (c - minConc) / (maxConc - minConc);
+          
+          // Create RGB values for green-yellow-red gradient
+          let r, g;
+          if (normalized < 0.5) {
+            // Green to Yellow (0-0.5)
+            r = Math.round(255 * (normalized * 2));
+            g = 255;
+          } else {
+            // Yellow to Red (0.5-1)
+            r = 255;
+            g = Math.round(255 * (1 - (normalized - 0.5) * 2));
+          }
+          
+          return `rgb(${r}, ${g}, 0)`;
+        });
+        
+        const trace = {
+          x: x,
+          y: y,
+          z: z,
+          mode: 'markers',
+          marker: {
+            size: 4,
+            color: colors,
+            line: {
+              width: 0
+            }
+          },
+          type: 'scatter3d',
+          hovertemplate: 
+            'x: %{x}<br>' +
+            'y: %{y}<br>' +
+            'z: %{z}<br>' +
+            'concentration: %{text} ppm' +
+            '<extra></extra>',
+          text: concentrations.map(c => c.toFixed(2))
+        };
+        
+        const layout = {
+          title: {
+            text: '3D Concentration Data',
+            font: {
+              size: 18
+            }
+          },
+          scene: {
+            xaxis: { title: 'X Position' },
+            yaxis: { title: 'Y Position' },
+            zaxis: { title: 'Z Position' }
+          },
+          margin: {
+            l: 0,
+            r: 0,
+            b: 0,
+            t: 50,
+            pad: 0
+          },
+          showlegend: false
+        };
+        
+        Plotly.newPlot(plotContainer, [trace], layout);
+        
+        // Update status
+        statusEl.textContent = `Successfully loaded ${x.length} data points (Concentration range: ${minConc.toFixed(2)} - ${maxConc.toFixed(2)} ppm)`;
+        statusEl.className = 'status success';
+        loadingEl.style.display = 'none';
+      }
+      
+      function showError(message) {
+        statusEl.textContent = message;
+        statusEl.className = 'status error';
+        loadingEl.style.display = 'none';
+      }
+      
+      // Initialize empty plot
+      Plotly.newPlot(plotContainer, [{
+        x: [], y: [], z: [],
+        mode: 'markers',
+        type: 'scatter3d'
+      }], {
+        scene: {
+          xaxis: { title: 'X Position' },
+          yaxis: { title: 'Y Position' },
+          zaxis: { title: 'Z Position' }
+        },
+        margin: { l: 0, r: 0, b: 0, t: 50, pad: 0 }
+      });
+    });
+  </script>
+</body>
+</html>
