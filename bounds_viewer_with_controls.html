@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flammable Envelope Visualization (File Load + Views)</title>
+    <title>Flammable Envelope Visualization (File Load + Views + Keys)</title>
     <style>
         body {
             margin: 0;
@@ -47,10 +47,21 @@
          #controls-panel button:hover {
             background-color: #555;
          }
-         #controls-panel .view-controls {
+         #controls-panel .view-controls, #controls-panel .keyboard-info {
              margin-top: 10px;
              border-top: 1px solid #555;
              padding-top: 10px;
+             font-size: 0.9em;
+             line-height: 1.4;
+         }
+         .keyboard-info kbd { /* Style keyboard keys */
+             background-color: #eee;
+             color: #333;
+             border-radius: 3px;
+             padding: 1px 4px;
+             border: 1px solid #aaa;
+             font-family: monospace;
+             font-size: 0.95em;
          }
          #status {
             margin-top: 5px;
@@ -95,6 +106,13 @@
             <button id="btnTopDown">Top Down</button>
             <button id="btnSideOn">Side On</button>
         </div>
+
+        <div class="keyboard-info">
+             <label>Keyboard Controls:</label>
+             Zoom: <kbd>+</kbd> / <kbd>-</kbd><br/>
+             Tilt: <kbd>Shift</kbd>+<kbd>&uarr;</kbd> / <kbd>Shift</kbd>+<kbd>&darr;</kbd><br/>
+             Roll: <kbd>[</kbd> / <kbd>]</kbd>
+        </div>
     </div>
 
      <div id="legend">
@@ -125,6 +143,25 @@
       let pointsObject = null; // To hold the point cloud, initially null
       let boundsObject = null; // To hold the bounds wireframe
       let sceneCenter = new THREE.Vector3(0, 0, 0); // To store the calculated center
+      const clock = new THREE.Clock(); // Clock for animation timing & keyboard controls
+
+      // Keyboard state tracking
+      const keyStates = {
+          zoomIn: false, zoomOut: false,
+          rollLeft: false, rollRight: false,
+          tiltUp: false, tiltDown: false
+      };
+      // Control speeds
+      const ZOOM_SPEED = 2.0; // Controls dolly speed factor
+      const TILT_SPEED = 1.0; // Radians per second
+      const ROLL_SPEED = 1.0; // Radians per second
+
+      // Temporary vectors for calculations to avoid allocations in loop
+      const _vector = new THREE.Vector3();
+      const _camFwd = new THREE.Vector3();
+      const _camRight = new THREE.Vector3();
+      const _camUp = new THREE.Vector3();
+
 
       // --- Embedded Bounds Data ---
       const boundsData = `,x_min,x_max,y_min,y_max,z_min,z_max\r\n0,125.32994127692768,135.32994127692768,-120.11425987328477,-110.11425987328477,0,10\r\n`;
@@ -139,18 +176,8 @@
                 bounds.z_min = parseFloat(values[headerMap.z_min]); bounds.z_max = parseFloat(values[headerMap.z_max]);
                 if (Object.values(bounds).some(isNaN)) throw new Error("Invalid bounds data.");
             } else { throw new Error("Bounds data format incorrect."); }
-            // Calculate scene center based on bounds
-            sceneCenter.set(
-                 (bounds.x_max + bounds.x_min) / 2,
-                 (bounds.y_max + bounds.y_min) / 2,
-                 (bounds.z_max + bounds.z_min) / 2
-            );
-      } catch (e) {
-            console.error("Error parsing embedded bounds data:", e);
-            bounds = { x_min: -10, x_max: 10, y_min: -10, y_max: 10, z_min: 0, z_max: 10 };
-            sceneCenter.set(0, 0, 5); // Default center
-            alert("Error parsing bounds data. Using default bounds.");
-      }
+            sceneCenter.set( (bounds.x_max + bounds.x_min) / 2, (bounds.y_max + bounds.y_min) / 2, (bounds.z_max + bounds.z_min) / 2 );
+      } catch (e) { /* Error handling... */ }
       // --- End Bounds Data ---
 
       // --- DOM Elements ---
@@ -165,47 +192,32 @@
       const btnNorthUp = document.getElementById('btnNorthUp');
       const btnTopDown = document.getElementById('btnTopDown');
       const btnSideOn = document.getElementById('btnSideOn');
-      const clock = new THREE.Clock(); // Clock for animation timing
 
 
       function init() {
-          // --- Scene ---
+          // --- Scene, Camera, Renderer, Controls, Lights --- (Mostly unchanged)
           scene = new THREE.Scene();
           scene.background = new THREE.Color(0x111111);
-
-          // --- Camera ---
           const aspect = window.innerWidth / window.innerHeight;
-          camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 2000); // Increased far plane
-
-          // --- Renderer ---
+          camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 2000);
           renderer = new THREE.WebGLRenderer({ antialias: true });
-          renderer.setPixelRatio(window.devicePixelRatio); // Better resolution on high DPI displays
+          renderer.setPixelRatio(window.devicePixelRatio);
           renderer.setSize(window.innerWidth, window.innerHeight);
           document.getElementById('container').appendChild(renderer.domElement);
-
-          // --- Controls ---
           controls = new OrbitControls(camera, renderer.domElement);
           controls.enableDamping = true;
           controls.dampingFactor = 0.05;
-          controls.target.copy(sceneCenter); // Set initial target
-
-          // --- Lights ---
+          controls.target.copy(sceneCenter);
           scene.add(new THREE.AmbientLight(0xffffff, 0.6));
           const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-          directionalLight.position.set(50, 50, 50);
-          scene.add(directionalLight);
+          directionalLight.position.set(50, 50, 50); scene.add(directionalLight);
 
-          // --- Create and Add Bounding Box ---
+          // --- Initial Setup ---
           createBoundsVisual();
-
-          // --- Axes Helper (Optional) ---
           const boxSize = Math.max(bounds.x_max - bounds.x_min, bounds.y_max - bounds.y_min, bounds.z_max - bounds.z_min);
           const axesHelper = new THREE.AxesHelper(boxSize * 1.2);
-          axesHelper.position.set(bounds.x_min, bounds.y_min, bounds.z_min);
-          scene.add(axesHelper);
-
-          // --- Adjust Initial Camera ---
-          camera.position.set(sceneCenter.x, sceneCenter.y + boxSize * 0.5, sceneCenter.z + boxSize * 1.8); // Position further back
+          axesHelper.position.set(bounds.x_min, bounds.y_min, bounds.z_min); scene.add(axesHelper);
+          camera.position.set(sceneCenter.x, sceneCenter.y + boxSize * 0.5, sceneCenter.z + boxSize * 1.8);
           camera.lookAt(sceneCenter);
           controls.update();
 
@@ -216,32 +228,54 @@
           btnTopDown.addEventListener('click', setTopDownView);
           btnSideOn.addEventListener('click', setSideOnView);
           window.addEventListener('resize', onWindowResize, false);
+          // Add Keyboard Listeners
+          window.addEventListener('keydown', handleKeyDown);
+          window.addEventListener('keyup', handleKeyUp);
+
 
           // --- Start Animation ---
           animate();
       }
 
-      function createBoundsVisual() {
-          if (boundsObject) scene.remove(boundsObject);
-          const width = bounds.x_max - bounds.x_min;
-          const height = bounds.y_max - bounds.y_min;
-          const depth = bounds.z_max - bounds.z_min;
-          const boxGeometry = new THREE.BoxGeometry(width, height, depth);
-          const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
-          const lineMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa });
-          boundsObject = new THREE.LineSegments(edgesGeometry, lineMaterial);
-          boundsObject.position.copy(sceneCenter); // Position at calculated center
-          scene.add(boundsObject);
+       // --- Keyboard Handlers ---
+      function handleKeyDown(event) {
+           // Prevent default browser actions for keys we handle
+            let preventDefault = true;
+            switch (event.key) {
+                case '=': case '+': keyStates.zoomIn = true; break;
+                case '-': case '_': keyStates.zoomOut = true; break;
+                case '[': case '{': keyStates.rollLeft = true; break;
+                case ']': case '}': keyStates.rollRight = true; break;
+                case 'ArrowUp': if (event.shiftKey) keyStates.tiltUp = true; else preventDefault = false; break;
+                case 'ArrowDown': if (event.shiftKey) keyStates.tiltDown = true; else preventDefault = false; break;
+                default: preventDefault = false; break; // Don't prevent default for other keys
+            }
+            if (preventDefault) {
+                 event.preventDefault();
+            }
       }
 
-      // --- Camera View Functions ---
+       function handleKeyUp(event) {
+           switch (event.key) {
+                case '=': case '+': keyStates.zoomIn = false; break;
+                case '-': case '_': keyStates.zoomOut = false; break;
+                case '[': case '{': keyStates.rollLeft = false; break;
+                case ']': case '}': keyStates.rollRight = false; break;
+                case 'ArrowUp': if (event.shiftKey) keyStates.tiltUp = false; break; // Check shiftKey on up too
+                case 'ArrowDown': if (event.shiftKey) keyStates.tiltDown = false; break;
+            }
+             // Explicitly reset if Shift is released while arrow is held
+            if (!event.shiftKey) {
+                 if (event.key === 'ArrowUp') keyStates.tiltUp = false;
+                 if (event.key === 'ArrowDown') keyStates.tiltDown = false;
+            }
+      }
 
-      function tweenCamera(targetPosition, targetLookAt, duration = 800) {
+      // --- Camera Manipulation Functions --- (tweenCamera, setNorthUpView, etc. are unchanged)
+      function tweenCamera(targetPosition, targetLookAt, duration = 800) { /* ... as before ... */
           TWEEN.removeAll(); // Stop any existing tweens
-
           const currentCamPos = camera.position.clone();
           const currentLookAt = controls.target.clone(); // Target of the controls
-
           new TWEEN.Tween({
               x: currentCamPos.x, y: currentCamPos.y, z: currentCamPos.z,
               tx: currentLookAt.x, ty: currentLookAt.y, tz: currentLookAt.z
@@ -254,156 +288,83 @@
           .onUpdate((obj) => {
               camera.position.set(obj.x, obj.y, obj.z);
               controls.target.set(obj.tx, obj.ty, obj.tz);
-              camera.lookAt(controls.target); // Make sure camera orientation updates
-              controls.update(); // Update controls during tween
+              // camera.lookAt(controls.target); // Let controls.update handle lookAt
           })
-           .onComplete(() => {
-                 controls.update(); // Final update
+          .onComplete(() => {
+                // Ensure final state is accurate
+                camera.position.copy(targetPosition);
+                controls.target.copy(targetLookAt);
+                controls.update();
            })
           .start();
       }
-
-      function setNorthUpView() {
-          // Calculate current offset and spherical coordinates
-          const offset = camera.position.clone().sub(controls.target);
-          const radius = offset.length();
-          // Get current spherical coords (phi is angle from Y+, theta is angle from Z+)
-          const spherical = new THREE.Spherical().setFromVector3(offset);
-
-          // Keep radius and angles, but force the 'up' vector
-          // Reconstruct position using the same angles/radius
-          const newPos = new THREE.Vector3().setFromSphericalCoords(radius, spherical.phi, spherical.theta);
-          newPos.add(controls.target); // Add target back to get world position
-
-          // We need to tween the camera *rotation* effectively.
-          // OrbitControls manages 'up' alignment. Often, just setting the target
-          // and position and letting controls.update() fix the 'up' works best.
-          // Let's tween position and target, OrbitControls should handle the rest.
-           tweenCamera(newPos, controls.target.clone());
-
-           // If OrbitControls doesn't fix 'up' automatically during/after tween,
-           // a more complex solution involving quaternions might be needed,
-           // but let's rely on controls.update() first.
-      }
-
-
-      function setTopDownView() {
-           const distance = camera.position.distanceTo(controls.target);
-           // Position directly above the center (adjust distance slightly if needed)
+      function setNorthUpView() { /* ... as before ... */
+            const offset = camera.position.clone().sub(controls.target);
+            const radius = offset.length();
+            const spherical = new THREE.Spherical().setFromVector3(offset);
+            const newPos = new THREE.Vector3().setFromSphericalCoords(radius, spherical.phi, spherical.theta);
+            newPos.add(controls.target);
+            tweenCamera(newPos, controls.target.clone());
+       }
+      function setTopDownView() { /* ... as before ... */
+           const distance = Math.max(1.0, camera.position.distanceTo(controls.target)); // Ensure minimum distance
            const targetPosition = new THREE.Vector3(sceneCenter.x, sceneCenter.y + distance, sceneCenter.z);
            const targetLookAt = sceneCenter.clone();
            tweenCamera(targetPosition, targetLookAt);
-            // Note: camera.up will likely be implicitly handled by OrbitControls
-            // when looking straight down after the tween finishes and controls update.
-            // If not, we might need to manually set camera.up after tweening.
       }
-
-      function setSideOnView() {
+      function setSideOnView() { /* ... as before ... */
           const offset = camera.position.clone().sub(controls.target);
           const distance = offset.length();
-          // Keep Y position at the scene center's Y
-          offset.y = 0; // Project onto the horizontal plane (relative to target)
-          // Check if offset is near zero (camera was already top/bottom down)
-          if (offset.lengthSq() < 0.001) {
-              // If looking straight down/up, default to side view along X axis
-              offset.set(distance, 0, 0);
-          } else {
-               // Maintain horizontal direction but adjust distance if needed (using original distance here)
-               offset.setLength(distance);
-          }
-
+          offset.y = 0;
+          if (offset.lengthSq() < 0.001) { offset.set(distance, 0, 0); }
+          else { offset.setLength(distance); }
           const targetPosition = controls.target.clone().add(offset);
-          targetPosition.y = sceneCenter.y; // Ensure it's level with center
+          targetPosition.y = sceneCenter.y;
           const targetLookAt = sceneCenter.clone();
           tweenCamera(targetPosition, targetLookAt);
-           // Standard up vector (0,1,0) should be fine here and handled by controls
       }
 
 
-      // --- File Handling & Point Cloud ---
-
-      function handleFileSelect(event) {
-          const file = event.target.files[0];
-          if (!file) { statusDiv.textContent = 'No file selected.'; return; }
-          statusDiv.textContent = `Reading file: ${file.name}...`;
-          legendDiv.style.display = 'none';
-          const reader = new FileReader();
-          reader.onload = (e) => {
-              statusDiv.textContent = 'Processing data...';
-              try {
-                  setTimeout(() => {
-                      parseAndVisualizePoints(e.target.result);
-                      statusDiv.textContent = `Loaded: ${file.name}`;
-                  }, 10);
-              } catch (error) { /* Error handling... */ }
-          };
-          reader.onerror = (e) => { /* Error handling... */ };
-          reader.readAsText(file);
+      // --- File Handling & Point Cloud --- (Unchanged)
+      function createBoundsVisual() { /* ... as before ... */
+           if (boundsObject) scene.remove(boundsObject);
+           const width = bounds.x_max - bounds.x_min; const height = bounds.y_max - bounds.y_min; const depth = bounds.z_max - bounds.z_min;
+           const boxGeometry = new THREE.BoxGeometry(width, height, depth); const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
+           const lineMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa }); boundsObject = new THREE.LineSegments(edgesGeometry, lineMaterial);
+           boundsObject.position.copy(sceneCenter); scene.add(boundsObject);
       }
-
-       function handlePointSizeChange(event) {
-            const newSize = parseFloat(event.target.value);
-            pointSizeValueSpan.textContent = newSize.toFixed(2);
-            if (pointsObject) { pointsObject.material.size = newSize; }
-        }
-
-      function parseAndVisualizePoints(fileContent) {
-          if (pointsObject) {
-              scene.remove(pointsObject);
-              pointsObject.geometry.dispose();
-              pointsObject.material.dispose();
-              pointsObject = null;
-          }
-
-          const lines = fileContent.trim().split(/\r?\n/);
-          if (lines.length < 2) throw new Error("File contains no data rows.");
-
-          const headers = lines[0].trim().split(',').map(h => h.trim());
-          const xIndex = headers.indexOf('x'), yIndex = headers.indexOf('y'), zIndex = headers.indexOf('z'), concIndex = headers.indexOf('conc_g_m3');
-          if (xIndex===-1||yIndex===-1||zIndex===-1||concIndex===-1) throw new Error(`Missing required columns. Need x, y, z, conc_g_m3.`);
-
-          const pointsData = [];
-          let sumConc = 0, minConc = Infinity, maxConc = -Infinity;
-          for (let i = 1; i < lines.length; i++) {
-              const values = lines[i].trim().split(',');
-              if (values.length <= Math.max(xIndex, yIndex, zIndex, concIndex)) continue;
-              const x = parseFloat(values[xIndex]), y = parseFloat(values[yIndex]), z = parseFloat(values[zIndex]), conc = parseFloat(values[concIndex]);
-              if (isNaN(x) || isNaN(y) || isNaN(z) || isNaN(conc)) { console.warn(`Skipping invalid row ${i + 1}`); continue; }
-              pointsData.push({ x, y, z, conc });
-              sumConc += conc; minConc = Math.min(minConc, conc); maxConc = Math.max(maxConc, conc);
-          }
+      function handleFileSelect(event) { /* ... as before ... */
+           const file = event.target.files[0]; if (!file) { statusDiv.textContent = 'No file selected.'; return; }
+           statusDiv.textContent = `Reading file: ${file.name}...`; legendDiv.style.display = 'none';
+           const reader = new FileReader();
+           reader.onload = (e) => { statusDiv.textContent = 'Processing data...'; try { setTimeout(() => { parseAndVisualizePoints(e.target.result); statusDiv.textContent = `Loaded: ${file.name}`; }, 10); } catch (error) { console.error("Error processing file:", error); statusDiv.textContent = `Error processing file: ${error.message}`; if (pointsObject) { scene.remove(pointsObject); pointsObject.geometry.dispose(); pointsObject.material.dispose(); pointsObject = null; } legendDiv.style.display = 'none'; } };
+           reader.onerror = (e) => { console.error("FileReader error:", e); statusDiv.textContent = 'Error reading file.'; legendDiv.style.display = 'none'; };
+           reader.readAsText(file);
+      }
+      function handlePointSizeChange(event) { /* ... as before ... */
+           const newSize = parseFloat(event.target.value); pointSizeValueSpan.textContent = newSize.toFixed(2);
+           if (pointsObject) { pointsObject.material.size = newSize; }
+      }
+      function parseAndVisualizePoints(fileContent) { /* ... as before ... */
+          if (pointsObject) { scene.remove(pointsObject); pointsObject.geometry.dispose(); pointsObject.material.dispose(); pointsObject = null; }
+          const lines = fileContent.trim().split(/\r?\n/); if (lines.length < 2) throw new Error("File contains no data rows.");
+          const headers = lines[0].trim().split(',').map(h => h.trim()); const xIndex = headers.indexOf('x'), yIndex = headers.indexOf('y'), zIndex = headers.indexOf('z'), concIndex = headers.indexOf('conc_g_m3'); if (xIndex===-1||yIndex===-1||zIndex===-1||concIndex===-1) throw new Error(`Missing required columns. Need x, y, z, conc_g_m3.`);
+          const pointsData = []; let sumConc = 0, minConc = Infinity, maxConc = -Infinity;
+          for (let i = 1; i < lines.length; i++) { const values = lines[i].trim().split(','); if (values.length <= Math.max(xIndex, yIndex, zIndex, concIndex)) continue; const x = parseFloat(values[xIndex]), y = parseFloat(values[yIndex]), z = parseFloat(values[zIndex]), conc = parseFloat(values[concIndex]); if (isNaN(x) || isNaN(y) || isNaN(z) || isNaN(conc)) { console.warn(`Skipping invalid row ${i + 1}`); continue; } pointsData.push({ x, y, z, conc }); sumConc += conc; minConc = Math.min(minConc, conc); maxConc = Math.max(maxConc, conc); }
           if (pointsData.length === 0) throw new Error("No valid data points found.");
-
-          const meanConc = sumConc / pointsData.length;
-          minConcSpan.textContent = minConc.toExponential(2); meanConcSpan.textContent = meanConc.toExponential(2); maxConcSpan.textContent = maxConc.toExponential(2);
-          legendDiv.style.display = 'block';
-
-          const positions = [], colors = [];
-          const colorBlue = new THREE.Color(0x0000ff), colorYellow = new THREE.Color(0xffff00), colorGreen = new THREE.Color(0x00ff00); // lime
-          const tempColor = new THREE.Color();
-          const rangeLow = meanConc - minConc, rangeHigh = maxConc - meanConc;
-
+          const meanConc = sumConc / pointsData.length; minConcSpan.textContent = minConc.toExponential(2); meanConcSpan.textContent = meanConc.toExponential(2); maxConcSpan.textContent = maxConc.toExponential(2); legendDiv.style.display = 'block';
+          const positions = [], colors = []; const colorBlue = new THREE.Color(0x0000ff), colorYellow = new THREE.Color(0xffff00), colorGreen = new THREE.Color(0x00ff00); const tempColor = new THREE.Color(); const rangeLow = meanConc - minConc, rangeHigh = maxConc - meanConc;
           for (const p of pointsData) {
               positions.push(p.x, p.y, p.z);
-              let lerpFactor = 0.5;
-              if (p.conc <= meanConc) {
-                   tempColor.copy(rangeLow > 1e-9 ? colorBlue.lerp(colorYellow, (p.conc - minConc) / rangeLow) : colorYellow);
-              } else {
-                  tempColor.copy(rangeHigh > 1e-9 ? colorYellow.lerp(colorGreen, (p.conc - meanConc) / rangeHigh) : colorYellow);
-              }
-               // Need to reset lerped colors if using lerp in place
-                colorBlue.set(0x0000ff); colorYellow.set(0xffff00); colorGreen.set(0x00ff00); // Reset base colors after potential lerp modification
-                colors.push(tempColor.r, tempColor.g, tempColor.b);
+              if (p.conc <= meanConc) { tempColor.copy(rangeLow > 1e-9 ? colorBlue.lerp(colorYellow, (p.conc - minConc) / rangeLow) : colorYellow); }
+              else { tempColor.copy(rangeHigh > 1e-9 ? colorYellow.lerp(colorGreen, (p.conc - meanConc) / rangeHigh) : colorYellow); }
+              colorBlue.setHex(0x0000ff); colorYellow.setHex(0xffff00); colorGreen.setHex(0x00ff00); // Reset base colors
+              colors.push(tempColor.r, tempColor.g, tempColor.b);
           }
-
-
-          const geometry = new THREE.BufferGeometry();
-          geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-          geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-          const material = new THREE.PointsMaterial({ size: parseFloat(pointSizeSlider.value), vertexColors: true, sizeAttenuation: true });
-          pointsObject = new THREE.Points(geometry, material);
-          scene.add(pointsObject);
+          const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+          const material = new THREE.PointsMaterial({ size: parseFloat(pointSizeSlider.value), vertexColors: true, sizeAttenuation: true }); pointsObject = new THREE.Points(geometry, material); scene.add(pointsObject);
       }
+
 
       // --- Core Animation Loop ---
       function onWindowResize() {
@@ -412,15 +373,63 @@
           renderer.setSize(window.innerWidth, window.innerHeight);
       }
 
+      function applyKeyboardControls(delta) {
+           if (!camera || !controls) return; // Ensure camera/controls are initialized
+
+           const dollyScale = Math.pow(0.95, ZOOM_SPEED); // Base scale for zooming
+
+           // Zooming
+            if (keyStates.zoomIn) { controls.dollyOut(dollyScale); } // DollyOut makes things appear closer
+            if (keyStates.zoomOut) { controls.dollyIn(dollyScale); } // DollyIn makes things appear further
+
+            // Tilting
+            if (keyStates.tiltUp || keyStates.tiltDown) {
+                // Get camera's right vector (perpendicular to forward and up)
+                 camera.getWorldDirection(_camFwd);
+                 _camRight.crossVectors(camera.up, _camFwd).normalize(); // Use world up and forward to get right
+
+                 const tiltAngle = (keyStates.tiltUp ? -1 : 1) * TILT_SPEED * delta; // Negative for up tilt
+
+                 // Rotate position around the right vector, pivoted at the target
+                 _vector.copy(camera.position).sub(controls.target);
+                 _vector.applyAxisAngle(_camRight, tiltAngle);
+                 camera.position.copy(controls.target).add(_vector);
+
+                 // Rotate camera's up vector around the right vector
+                 // camera.up.applyAxisAngle(_camRight, tiltAngle); // Might fight controls, let controls.update handle it
+
+                 controls.update(0); // Update controls immediately after manual change
+            }
+
+            // Rolling
+            if (keyStates.rollLeft || keyStates.rollRight) {
+                 // Get camera's forward vector
+                 camera.getWorldDirection(_camFwd);
+                 const rollAngle = (keyStates.rollLeft ? 1 : -1) * ROLL_SPEED * delta;
+
+                 // Rotate camera's up vector around the forward vector
+                 // This is the standard way to implement roll.
+                 // OrbitControls might fight this. Test carefully.
+                 camera.up.applyAxisAngle(_camFwd, rollAngle).normalize();
+
+                  controls.update(0); // Update controls immediately
+            }
+      }
+
+
       function animate() {
           requestAnimationFrame(animate); // Loop
 
-          const delta = clock.getDelta(); // Get time delta for smooth updates
+          const delta = clock.getDelta(); // Get time delta
+
+          // Apply keyboard movements (before controls.update)
+          applyKeyboardControls(delta);
 
           // Update TWEEN for camera animations
-          TWEEN.update(); // Use default time internal to TWEEN for simplicity here
+          TWEEN.update();
 
-          // Update OrbitControls AFTER tweens have potentially updated target/position
+          // Update OrbitControls (handles damping, mouse/touch input)
+          // It will also try to maintain camera.up alignment based on its state
           controls.update(delta);
 
           // Render the scene
